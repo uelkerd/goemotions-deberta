@@ -17,6 +17,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_TOKEN"] = "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"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Enable offline mode
 
+# NCCL configuration to prevent timeouts
+os.environ["NCCL_TIMEOUT"] = "3600"  # 1 hour timeout
+os.environ["NCCL_BLOCKING_WAIT"] = "1"  # Enable blocking wait
+os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"  # Better error handling
+
 from typing import List, Dict, Any
 import torch
 import torch.nn as nn
@@ -608,7 +613,7 @@ def main():
     print(f"✅ Created {len(train_dataset)} training examples")
     print(f"✅ Created {len(val_dataset)} validation examples")
     
-    # Training arguments
+    # Training arguments with NCCL timeout fixes
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -624,7 +629,7 @@ def main():
         gradient_checkpointing=False,  # Disable to avoid distributed training issues
         eval_strategy="epoch",
         save_strategy="epoch",
-        load_best_model_at_end=True,
+        load_best_model_at_end=False,  # Disable to avoid NCCL timeout in evaluation
         metric_for_best_model="f1_macro",
         greater_is_better=True,
         logging_steps=50,
@@ -634,6 +639,8 @@ def main():
         remove_unused_columns=False,
         report_to="none",  # Disable TensorBoard to avoid dependency issues
         ddp_find_unused_parameters=False,  # Optimize DDP performance
+        dataloader_num_workers=0,  # Reduce worker processes to avoid NCCL issues
+        skip_memory_metrics=True,  # Skip memory metrics to reduce overhead
     )
     
     # Data collator
