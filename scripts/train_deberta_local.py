@@ -288,7 +288,7 @@ def main():
         weight_decay=args.weight_decay,
         fp16=args.fp16,
         tf32=args.tf32,
-        gradient_checkpointing=args.gradient_checkpointing,
+        gradient_checkpointing=False,  # Disable to avoid distributed training issues
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
