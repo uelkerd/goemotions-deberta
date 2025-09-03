@@ -1,0 +1,37 @@
+# Cursor IDE Rules for Reliable Terminal Operations
+
+## Terminal Command Guidelines
+- Always use non-interactive versions of commands when possible
+- For git commands, always append `| cat` or use `--no-pager` flag
+- Avoid commands that require user input or confirmation
+- Use explicit timeouts for long-running commands
+- Prefer MCP servers over terminal commands for filesystem operations when available
+
+## Git Command Rules
+- Use `git --no-pager` for all git commands to avoid pager issues
+- For git log: `git --no-pager log --oneline -10`
+- For git status: `git --no-pager status`
+- For git diff: `git --no-pager diff`
+- Always use `git add .` instead of interactive git add
+- Use `git commit -m "message"` instead of interactive commits
+
+## Environment Variables
+- Set `PAGER="head -n 10000 | cat"` for all terminal sessions
+- Use `COMPOSER_NO_INTERACTION=1` for composer commands
+- Avoid commands that spawn interactive shells
+
+## Command Patterns
+- Use `command | cat` for commands that might use pagers
+- Use `timeout 30 command` for potentially hanging commands
+- Use `command 2>&1` to capture both stdout and stderr
+- Prefer absolute paths when possible
+
+## MCP Server Preferences
+- Use MCP filesystem servers for file operations when available
+- Use MCP git servers for version control operations when available
+- Fall back to terminal commands only when MCP servers are unavailable
+
+## Error Handling
+- If a command hangs, suggest using `timeout` or alternative approaches
+- Always provide fallback options for critical operations
+- Use background processes (`&`) for long-running operations when appropriate
