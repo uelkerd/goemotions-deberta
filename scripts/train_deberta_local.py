@@ -19,6 +19,8 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Enable offline mode
 
 from typing import List, Dict, Any
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from torch.utils.data import Dataset
 from transformers import (
@@ -39,6 +41,77 @@ EMOTION_LABELS = [
     "excitement", "fear", "gratitude", "grief", "joy", "love", "nervousness", "optimism",
     "pride", "realization", "relief", "remorse", "sadness", "surprise", "neutral"
 ]
+
+class AsymmetricLoss(nn.Module):
+    """
+    Asymmetric Loss for Multi-Label Classification
+    Addresses class imbalance by down-weighting easy negatives while maintaining focus on hard positives
+    """
+    def __init__(self, gamma_neg=2.0, gamma_pos=1.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
+        super(AsymmetricLoss, self).__init__()
+        self.gamma_neg = gamma_neg
+        self.gamma_pos = gamma_pos
+        self.clip = clip
+        self.disable_torch_grad_focal_loss = disable_torch_grad_focal_loss
+        self.eps = eps
+
+    def forward(self, x, y):
+        """"
+        Parameters
+        ----------
+        x: input logits
+        y: targets (multi-label binarized vector)
+        """
+        # Calculating Probabilities
+        x_sigmoid = torch.sigmoid(x)
+        xs_pos = x_sigmoid
+        xs_neg = 1 - x_sigmoid
+
+        # Asymmetric Clipping
+        if self.clip is not None and self.clip > 0:
+            xs_neg = (xs_neg + self.clip).clamp(max=1)
+
+        # Basic CE calculation
+        los_pos = y * torch.log(xs_pos.clamp(min=self.eps))
+        los_neg = (1 - y) * torch.log(xs_neg.clamp(min=self.eps))
+        loss = los_pos + los_neg
+
+        # Asymmetric Focusing
+        if self.gamma_neg > 0 or self.gamma_pos > 0:
+            if self.disable_torch_grad_focal_loss:
+                torch._C.set_grad_enabled(False)
+            pt0 = xs_pos * y
+            pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
+            pt = pt0 + pt1
+            one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
+            one_sided_w = torch.pow(1 - pt, one_sided_gamma)
+            if self.disable_torch_grad_focal_loss:
+                torch._C.set_grad_enabled(True)
+            loss *= one_sided_w
+
+        return -loss.sum()
+
+class AsymmetricLossTrainer(Trainer):
+    """
+    Custom Trainer that uses Asymmetric Loss instead of default BCE
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05)
+    
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """
+        Override compute_loss to use Asymmetric Loss
+        """
+        labels = inputs.get("labels")
+        # Forward pass
+        outputs = model(**inputs)
+        logits = outputs.get("logits")
+        
+        # Use Asymmetric Loss instead of default loss
+        loss = self.asymmetric_loss(logits, labels)
+        
+        return (loss, outputs) if return_outputs else loss
 
 class JsonlMultiLabelDataset(Dataset):
     """Dataset for multi-label classification from JSONL files"""
@@ -243,6 +316,8 @@ def main():
     parser.add_argument("--tf32", action="store_true")
     parser.add_argument("--gradient_checkpointing", action="store_true")
     parser.add_argument("--max_length", type=int, default=512)
+    parser.add_argument("--use_asymmetric_loss", action="store_true", default=True, 
+                       help="Use Asymmetric Loss for better class imbalance handling")
     
     args = parser.parse_args()
     
@@ -306,15 +381,27 @@ def main():
     # Data collator
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
-    # Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        data_collator=data_collator,
-        compute_metrics=compute_metrics_with_thresholds,
-    )
+    # Choose trainer based on loss function
+    if args.use_asymmetric_loss:
+        print("🎯 Using Asymmetric Loss for better class imbalance handling")
+        trainer = AsymmetricLossTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics_with_thresholds,
+        )
+    else:
+        print("📊 Using standard BCE Loss")
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics_with_thresholds,
+        )
     
     # Train
     print("🚀 Starting training...")
