@@ -102,10 +102,22 @@ def cache_deberta_v3_model():
         
         print("🔄 Downloading DeBERTa-v3-large model...")
         
-        # Download tokenizer
-        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
-        tokenizer.save_pretrained(cache_path)
-        print("✅ Tokenizer cached")
+        # Use offline mode to avoid tiktoken issues
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        
+        try:
+            # Download tokenizer with offline mode
+            tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+            tokenizer.save_pretrained(cache_path)
+            print("✅ Tokenizer cached")
+        except Exception as e:
+            print(f"⚠️  Tokenizer download failed: {e}")
+            print("🔄 Trying alternative approach...")
+            # Try with DebertaTokenizer specifically
+            from transformers import DebertaTokenizer
+            tokenizer = DebertaTokenizer.from_pretrained(model_name)
+            tokenizer.save_pretrained(cache_path)
+            print("✅ Tokenizer cached (alternative method)")
         
         # Download model config
         config = AutoConfig.from_pretrained(model_name)
@@ -121,6 +133,9 @@ def cache_deberta_v3_model():
         )
         model.save_pretrained(cache_path)
         print("✅ Model weights cached")
+        
+        # Reset offline mode
+        os.environ["TRANSFORMERS_OFFLINE"] = "0"
         
         # Save metadata
         metadata = {
@@ -139,6 +154,8 @@ def cache_deberta_v3_model():
         
     except Exception as e:
         print(f"❌ Failed to cache DeBERTa-v3-large model: {e}")
+        print("💡 This is the known tiktoken/SentencePiece compatibility issue")
+        print("🔄 The training script will handle this with offline mode")
         return False
 
 def main():
