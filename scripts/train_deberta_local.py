@@ -105,49 +105,84 @@ def compute_metrics_with_thresholds(eval_pred):
     return metrics
 
 def load_model_and_tokenizer_local(model_type="deberta-v3-large"):
-    """Load model and tokenizer from local cache"""
-    print(f"🤖 Loading {model_type} from local cache...")
+    """Load model and tokenizer from local cache or download if needed"""
+    print(f"🤖 Loading {model_type}...")
     
-    # Determine model path
+    # Determine model path and name
     if model_type == "deberta-v3-large":
         model_path = "models/deberta-v3-large"
+        model_name = "microsoft/deberta-v3-large"
     elif model_type == "roberta-large":
         model_path = "models/roberta-large"
+        model_name = "roberta-large"
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
     # Check if local cache exists
-    if not os.path.exists(model_path):
-        print(f"❌ Local cache not found at {model_path}")
-        print("💡 Run 'python scripts/setup_local_cache.py' first")
-        return None, None
+    if os.path.exists(model_path) and os.path.exists(f"{model_path}/config.json"):
+        print(f"📁 Found local cache at {model_path}")
+        try:
+            # Load tokenizer from local cache
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+                use_fast=False,
+                local_files_only=True
+            )
+            print(f"✅ {model_type} tokenizer loaded from local cache")
+            
+            # Load model from local cache
+            config = AutoConfig.from_pretrained(
+                model_path,
+                num_labels=len(EMOTION_LABELS),
+                problem_type="multi_label_classification"
+            )
+            
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_path,
+                config=config
+            )
+            print(f"✅ {model_type} model loaded from local cache")
+            
+            return model, tokenizer
+            
+        except Exception as e:
+            print(f"⚠️  Failed to load from local cache: {e}")
+            print("🔄 Will download fresh copy...")
+    
+    # Download fresh copy with offline mode strategy
+    print(f"🔄 Downloading {model_type} with offline mode strategy...")
     
     try:
-        # Load tokenizer from local cache
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
-            use_fast=False,
-            local_files_only=True
-        )
-        print(f"✅ {model_type} tokenizer loaded from local cache")
+        # Create directory
+        os.makedirs(model_path, exist_ok=True)
         
-        # Load model from local cache
+        # Load tokenizer with offline mode
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            use_fast=False,
+            local_files_only=False  # Allow download
+        )
+        tokenizer.save_pretrained(model_path)
+        print(f"✅ {model_type} tokenizer downloaded and cached")
+        
+        # Load model
         config = AutoConfig.from_pretrained(
-            model_path,
+            model_name,
             num_labels=len(EMOTION_LABELS),
             problem_type="multi_label_classification"
         )
         
         model = AutoModelForSequenceClassification.from_pretrained(
-            model_path,
+            model_name,
             config=config
         )
-        print(f"✅ {model_type} model loaded from local cache")
+        model.save_pretrained(model_path)
+        print(f"✅ {model_type} model downloaded and cached")
         
         return model, tokenizer
         
     except Exception as e:
-        print(f"❌ Failed to load {model_type} from local cache: {e}")
+        print(f"❌ Failed to download {model_type}: {e}")
         return None, None
 
 def load_dataset_local():

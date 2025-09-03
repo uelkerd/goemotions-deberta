@@ -113,9 +113,9 @@ def cache_deberta_v3_model():
         except Exception as e:
             print(f"⚠️  Tokenizer download failed: {e}")
             print("🔄 Trying alternative approach...")
-            # Try with DebertaTokenizer specifically
-            from transformers import DebertaTokenizer
-            tokenizer = DebertaTokenizer.from_pretrained(model_name)
+            # Try with DebertaV2Tokenizer specifically (correct for DeBERTa-v3)
+            from transformers import DebertaV2Tokenizer
+            tokenizer = DebertaV2Tokenizer.from_pretrained(model_name)
             tokenizer.save_pretrained(cache_path)
             print("✅ Tokenizer cached (alternative method)")
         
