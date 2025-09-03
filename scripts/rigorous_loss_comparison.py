@@ -72,14 +72,15 @@ class RigorousLossComparison:
         output_dir = self.base_output_dir / f"exp_{config_name}_{self.experiment_id}"
         output_dir.mkdir(exist_ok=True)
         
-        # Build command
+        # Build command with absolute path to avoid distributed training issues
+        script_path = os.path.abspath("scripts/train_deberta_local.py")
         cmd = [
-            "python3", "scripts/train_deberta_local.py",
+            "python3", script_path,
             "--output_dir", str(output_dir),
             "--model_type", "deberta-v3-large",
-            "--per_device_train_batch_size", "8",
-            "--per_device_eval_batch_size", "16",
-            "--gradient_accumulation_steps", "4",
+            "--per_device_train_batch_size", "4",
+            "--per_device_eval_batch_size", "8",
+            "--gradient_accumulation_steps", "2",
             "--num_train_epochs", str(num_epochs),
             "--learning_rate", "1e-5",
             "--lr_scheduler_type", "cosine",
@@ -169,13 +170,9 @@ class RigorousLossComparison:
         
         for config_name, config in self.loss_configs.items():
             try:
-                # Try distributed training first
-                result = self.run_single_experiment(config_name, config, num_epochs, single_gpu=False)
-                
-                # If distributed fails and single GPU fallback is enabled, retry with single GPU
-                if not result["success"] and single_gpu_fallback and "timeout" in result.get("error", "").lower():
-                    print("🔄 Distributed training failed, retrying with single GPU...")
-                    result = self.run_single_experiment(config_name + "_single_gpu", config, num_epochs, single_gpu=True)
+                # Use single GPU directly since distributed has issues
+                print("🔧 Using single GPU mode for stability")
+                result = self.run_single_experiment(config_name, config, num_epochs, single_gpu=True)
                 
                 self.results[config_name] = result
                 

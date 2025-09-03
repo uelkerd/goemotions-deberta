@@ -246,7 +246,7 @@ class CombinedLossTrainer(Trainer):
         print(f"📊 Class weights computed: {self.class_weights}")
         print(f"🎯 Loss combination: {self.loss_combination_ratio} ASL + {1-self.loss_combination_ratio} Focal")
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Combined loss: ASL + Class Weighting + Focal Loss
         """
@@ -275,7 +275,7 @@ class AsymmetricLossTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05)
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Override compute_loss to use Asymmetric Loss
         """
