@@ -74,51 +74,34 @@ class RigorousLossComparison:
         
         # Build command with absolute path to avoid distributed training issues
         script_path = os.path.abspath("scripts/train_deberta_local.py")
-        cmd = [
-            "python3", script_path,
-            "--output_dir", str(output_dir),
-            "--model_type", "deberta-v3-large",
-            "--per_device_train_batch_size", "4",
-            "--per_device_eval_batch_size", "8",
-            "--gradient_accumulation_steps", "2",
-            "--num_train_epochs", str(num_epochs),
-            "--learning_rate", "1e-5",
-            "--lr_scheduler_type", "cosine",
-            "--warmup_ratio", "0.1",
-            "--weight_decay", "0.01",
-            "--fp16",
-            "--tf32"
-        ]
-        
+        base_cmd = f"python3 {script_path} --output_dir {str(output_dir)} --model_type deberta-v3-large --per_device_train_batch_size 4 --per_device_eval_batch_size 2 --gradient_accumulation_steps 2 --num_train_epochs {str(num_epochs)} --learning_rate 1e-5 --lr_scheduler_type cosine --warmup_ratio 0.1 --weight_decay 0.01 --fp16 --tf32 --max_length 256"
+
         # Add loss-specific arguments
         if config.get("use_asymmetric_loss", False):
-            cmd.append("--use_asymmetric_loss")
-        
+            base_cmd += " --use_asymmetric_loss"
+
         if config.get("use_combined_loss", False):
-            cmd.extend([
-                "--use_combined_loss",
-                "--loss_combination_ratio", str(config.get("loss_combination_ratio", 0.7))
-            ])
-        
+            base_cmd += f" --use_combined_loss --loss_combination_ratio {str(config.get('loss_combination_ratio', 0.7))}"
+
         # Use single GPU if specified (to avoid NCCL issues)
         if single_gpu:
             print("🔧 Using single GPU to avoid NCCL timeout issues")
             env = os.environ.copy()
             env["CUDA_VISIBLE_DEVICES"] = "0"
+            cmd = base_cmd
         else:
             print("🚀 Using distributed training (2 GPUs)")
-            cmd = [
-                "accelerate", "launch", 
-                "--num_processes=2", 
-                "--mixed_precision=fp16"
-            ] + cmd
+            cmd = f"accelerate launch --num_processes=2 --mixed_precision=fp16 {base_cmd}"
             env = os.environ.copy()
-        
+
+        # Wrap command with conda environment activation
+        conda_cmd = f"bash -c 'source $(conda info --base)/etc/profile.d/conda.sh && conda activate deberta-v3 && {cmd}'"
+
         # Run experiment
         start_time = time.time()
         try:
             print(f"⏱️  Starting training at {datetime.now().isoformat()}")
-            result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=7200)  # 2 hour timeout
+            result = subprocess.run(conda_cmd, env=env, capture_output=True, text=True, timeout=7200, shell=True)  # 2 hour timeout
             
             if result.returncode == 0:
                 print("✅ Training completed successfully")

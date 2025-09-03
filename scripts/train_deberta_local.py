@@ -163,15 +163,19 @@ class AsymmetricLoss(nn.Module):
         # Asymmetric Focusing
         if self.gamma_neg > 0 or self.gamma_pos > 0:
             if self.disable_torch_grad_focal_loss:
-                torch._C.set_grad_enabled(False)
-            pt0 = xs_pos * y
-            pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
-            pt = pt0 + pt1
-            one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
-            one_sided_w = torch.pow(1 - pt, one_sided_gamma)
-            if self.disable_torch_grad_focal_loss:
-                torch._C.set_grad_enabled(True)
-            loss *= one_sided_w
+                with torch.no_grad():
+                    pt0 = xs_pos * y
+                    pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
+                    pt = pt0 + pt1
+                    one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
+                    one_sided_w = torch.pow(1 - pt, one_sided_gamma)
+            else:
+                pt0 = xs_pos * y
+                pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
+                pt = pt0 + pt1
+                one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
+                one_sided_w = torch.pow(1 - pt, one_sided_gamma)
+            loss = loss * one_sided_w
 
         return -loss.sum()
 
@@ -236,7 +240,8 @@ class CombinedLossTrainer(Trainer):
     """
     def __init__(self, loss_combination_ratio=0.7, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05)
+        # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
         self.loss_combination_ratio = loss_combination_ratio
         
@@ -273,7 +278,8 @@ class AsymmetricLossTrainer(Trainer):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05)
+        # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -546,7 +552,7 @@ def main():
     parser.add_argument("--tf32", action="store_true")
     parser.add_argument("--gradient_checkpointing", action="store_true")
     parser.add_argument("--max_length", type=int, default=512)
-    parser.add_argument("--use_asymmetric_loss", action="store_true", default=True, 
+    parser.add_argument("--use_asymmetric_loss", action="store_true", default=False,
                        help="Use Asymmetric Loss for better class imbalance handling")
     parser.add_argument("--use_combined_loss", action="store_true", default=False,
                        help="Use Combined Loss (ASL + Class Weighting + Focal Loss) for maximum performance")
@@ -613,6 +619,11 @@ def main():
     print(f"✅ Created {len(train_dataset)} training examples")
     print(f"✅ Created {len(val_dataset)} validation examples")
     
+    # Disable gradient checkpointing to avoid "backward through graph a second time" errors
+    # This is incompatible with the current training setup
+    use_gradient_checkpointing = False
+    print("🔧 Disabling gradient checkpointing to prevent RuntimeError during backward pass")
+
     # Training arguments with NCCL timeout fixes
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -625,8 +636,8 @@ def main():
         warmup_ratio=args.warmup_ratio,
         weight_decay=args.weight_decay,
         fp16=args.fp16,
-        tf32=args.tf32,
-        gradient_checkpointing=False,  # Disable to avoid distributed training issues
+        tf32=False,  # Disable tf32 for evaluation stability
+        gradient_checkpointing=use_gradient_checkpointing,  # Conditional based on loss function
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=False,  # Disable to avoid NCCL timeout in evaluation
