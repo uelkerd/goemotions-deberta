@@ -61,6 +61,18 @@ class JsonlMultiLabelDataset(Dataset):
         text = item['text']
         labels = item['labels']
         
+        # Ensure labels is a list of integers (emotion indices)
+        if isinstance(labels, int):
+            labels = [labels]
+        elif not isinstance(labels, list):
+            labels = list(labels)
+        
+        # Convert to multi-label format (28-dimensional binary vector)
+        label_vector = [0.0] * len(EMOTION_LABELS)
+        for label_idx in labels:
+            if 0 <= label_idx < len(EMOTION_LABELS):
+                label_vector[label_idx] = 1.0
+        
         # Tokenize
         encoding = self.tokenizer(
             text,
@@ -73,7 +85,7 @@ class JsonlMultiLabelDataset(Dataset):
         return {
             'input_ids': encoding['input_ids'].flatten(),
             'attention_mask': encoding['attention_mask'].flatten(),
-            'labels': torch.tensor(labels, dtype=torch.float)
+            'labels': torch.tensor(label_vector, dtype=torch.float)
         }
 
 def compute_metrics_with_thresholds(eval_pred):
