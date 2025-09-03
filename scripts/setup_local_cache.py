@@ -95,8 +95,11 @@ def cache_deberta_v3_model():
         model_name = "microsoft/deberta-v3-large"
         cache_path = "models/deberta-v3-large"
         
-        # Check if already cached
-        if os.path.exists(f"{cache_path}/config.json"):
+        # Check if already cached (need both config and model weights)
+        if os.path.exists(f"{cache_path}/config.json") and (
+            os.path.exists(f"{cache_path}/model.safetensors") or 
+            os.path.exists(f"{cache_path}/pytorch_model.bin")
+        ):
             print("✅ DeBERTa-v3-large model already cached")
             return True
         
@@ -129,9 +132,10 @@ def cache_deberta_v3_model():
         model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
             num_labels=28,  # GoEmotions has 28 emotions
-            problem_type="multi_label_classification"
+            problem_type="multi_label_classification",
+            use_safetensors=True  # Use safetensors format for security
         )
-        model.save_pretrained(cache_path)
+        model.save_pretrained(cache_path, safe_serialization=True)
         print("✅ Model weights cached")
         
         # Reset offline mode
