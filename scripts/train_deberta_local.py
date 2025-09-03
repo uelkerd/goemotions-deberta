@@ -300,6 +300,7 @@ def main():
         dataloader_drop_last=False,
         remove_unused_columns=False,
         report_to="none",  # Disable TensorBoard to avoid dependency issues
+        ddp_find_unused_parameters=False,  # Optimize DDP performance
     )
     
     # Data collator
