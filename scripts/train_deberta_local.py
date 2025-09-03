@@ -277,7 +277,7 @@ def main():
         fp16=args.fp16,
         tf32=args.tf32,
         gradient_checkpointing=args.gradient_checkpointing,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="f1_macro",
