@@ -29,10 +29,89 @@ from transformers import (
 )
 from sklearn.metrics import f1_score, precision_recall_fscore_support
 import logging
+import time
+import random
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set random seeds for reproducibility
+def set_seeds(seed=42):
+    """Set random seeds for reproducible results"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+class ScientificLogger:
+    """
+    Comprehensive logging for scientific reproducibility
+    """
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+        self.start_time = time.time()
+        self.experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = f"{output_dir}/scientific_log_{self.experiment_id}.json"
+        self.metrics_history = []
+        
+    def log_experiment_start(self, config):
+        """Log experiment configuration"""
+        experiment_log = {
+            "experiment_id": self.experiment_id,
+            "start_time": datetime.now().isoformat(),
+            "configuration": config,
+            "system_info": {
+                "torch_version": torch.__version__,
+                "cuda_available": torch.cuda.is_available(),
+                "gpu_count": torch.cuda.device_count(),
+                "gpu_names": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+            }
+        }
+        self._write_log(experiment_log)
+        
+    def log_training_step(self, step, loss, learning_rate, epoch):
+        """Log training step metrics"""
+        step_log = {
+            "timestamp": datetime.now().isoformat(),
+            "step": step,
+            "epoch": epoch,
+            "loss": float(loss),
+            "learning_rate": float(learning_rate),
+            "elapsed_time": time.time() - self.start_time
+        }
+        self.metrics_history.append(step_log)
+        
+    def log_evaluation(self, eval_metrics, epoch):
+        """Log evaluation metrics"""
+        eval_log = {
+            "timestamp": datetime.now().isoformat(),
+            "epoch": epoch,
+            "evaluation_metrics": eval_metrics,
+            "elapsed_time": time.time() - self.start_time
+        }
+        self._write_log(eval_log)
+        
+    def log_experiment_end(self, final_metrics):
+        """Log final experiment results"""
+        final_log = {
+            "timestamp": datetime.now().isoformat(),
+            "experiment_id": self.experiment_id,
+            "total_time": time.time() - self.start_time,
+            "final_metrics": final_metrics,
+            "training_history": self.metrics_history
+        }
+        self._write_log(final_log)
+        
+    def _write_log(self, log_data):
+        """Write log data to file"""
+        import json
+        with open(self.log_file, 'a') as f:
+            f.write(json.dumps(log_data) + '\n')
 
 # GoEmotions labels
 EMOTION_LABELS = [
@@ -253,8 +332,10 @@ class JsonlMultiLabelDataset(Dataset):
             'labels': torch.tensor(label_vector, dtype=torch.float)
         }
 
-def compute_metrics_with_thresholds(eval_pred):
-    """Compute metrics with multiple thresholds"""
+def compute_comprehensive_metrics(eval_pred):
+    """
+    Comprehensive evaluation metrics for scientific rigor
+    """
     predictions, labels = eval_pred
     
     # Convert logits to probabilities
@@ -262,24 +343,76 @@ def compute_metrics_with_thresholds(eval_pred):
     
     metrics = {}
     
-    # Evaluate at multiple thresholds
-    for threshold in [0.3, 0.5, 0.7]:
+    # Evaluate at multiple thresholds for robustness
+    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    
+    for threshold in thresholds:
         preds = (probs >= threshold).astype(int)
         suffix = f"_t{int(threshold*10)}"
         
-        # Compute metrics
+        # Core metrics
         f1_micro = f1_score(labels, preds, average='micro', zero_division=0)
         f1_macro = f1_score(labels, preds, average='macro', zero_division=0)
+        f1_weighted = f1_score(labels, preds, average='weighted', zero_division=0)
         
+        # Precision and Recall
+        precision_micro = precision_recall_fscore_support(labels, preds, average='micro', zero_division=0)[0]
+        precision_macro = precision_recall_fscore_support(labels, preds, average='macro', zero_division=0)[0]
+        recall_micro = precision_recall_fscore_support(labels, preds, average='micro', zero_division=0)[1]
+        recall_macro = precision_recall_fscore_support(labels, preds, average='macro', zero_division=0)[1]
+        
+        # Per-class metrics for detailed analysis
+        precision_per_class = precision_recall_fscore_support(labels, preds, average=None, zero_division=0)[0]
+        recall_per_class = precision_recall_fscore_support(labels, preds, average=None, zero_division=0)[1]
+        f1_per_class = precision_recall_fscore_support(labels, preds, average=None, zero_division=0)[2]
+        
+        # Store metrics
         metrics[f"f1_micro{suffix}"] = f1_micro
         metrics[f"f1_macro{suffix}"] = f1_macro
+        metrics[f"f1_weighted{suffix}"] = f1_weighted
+        metrics[f"precision_micro{suffix}"] = precision_micro
+        metrics[f"precision_macro{suffix}"] = precision_macro
+        metrics[f"recall_micro{suffix}"] = recall_micro
+        metrics[f"recall_macro{suffix}"] = recall_macro
         metrics[f"avg_preds{suffix}"] = preds.sum(axis=1).mean()
+        
+        # Per-class metrics (for threshold 0.3 only to avoid clutter)
+        if threshold == 0.3:
+            for i, emotion in enumerate(EMOTION_LABELS):
+                if i < len(precision_per_class):
+                    metrics[f"precision_{emotion}"] = precision_per_class[i]
+                    metrics[f"recall_{emotion}"] = recall_per_class[i]
+                    metrics[f"f1_{emotion}"] = f1_per_class[i]
     
-    # Primary metrics (using 0.3 threshold for better performance)
+    # Primary metrics (using 0.3 threshold)
     metrics["f1_micro"] = metrics["f1_micro_t3"]
     metrics["f1_macro"] = metrics["f1_macro_t3"]
+    metrics["f1_weighted"] = metrics["f1_weighted_t3"]
+    metrics["precision_micro"] = metrics["precision_micro_t3"]
+    metrics["precision_macro"] = metrics["precision_macro_t3"]
+    metrics["recall_micro"] = metrics["recall_micro_t3"]
+    metrics["recall_macro"] = metrics["recall_macro_t3"]
+    
+    # Statistical analysis
+    metrics["class_imbalance_ratio"] = compute_class_imbalance_ratio(labels)
+    metrics["prediction_entropy"] = compute_prediction_entropy(probs)
     
     return metrics
+
+def compute_class_imbalance_ratio(labels):
+    """Compute the ratio between most and least frequent classes"""
+    class_counts = labels.sum(axis=0)
+    max_count = class_counts.max()
+    min_count = class_counts[class_counts > 0].min()  # Exclude zero counts
+    return float(max_count / min_count) if min_count > 0 else float('inf')
+
+def compute_prediction_entropy(probs):
+    """Compute entropy of predictions to measure uncertainty"""
+    # Avoid log(0) by adding small epsilon
+    eps = 1e-8
+    probs_clipped = np.clip(probs, eps, 1 - eps)
+    entropy = -np.sum(probs_clipped * np.log(probs_clipped), axis=1)
+    return float(entropy.mean())
 
 def load_model_and_tokenizer_local(model_type="deberta-v3-large"):
     """Load model and tokenizer from local cache or download if needed"""
@@ -417,14 +550,43 @@ def main():
     
     args = parser.parse_args()
     
-    print("🚀 GoEmotions DeBERTa Training (LOCAL CACHE VERSION)")
+    # Set random seeds for reproducibility
+    set_seeds(42)
+    
+    print("🚀 GoEmotions DeBERTa Training (SCIENTIFIC VERSION)")
     print("="*60)
     print(f"📁 Output directory: {args.output_dir}")
     print(f"🤖 Model: {args.model_type} (from local cache)")
     print(f"📊 Dataset: GoEmotions (from local cache)")
+    print(f"🔬 Scientific logging: ENABLED")
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Initialize scientific logger
+    scientific_logger = ScientificLogger(args.output_dir)
+    
+    # Log experiment configuration
+    config = {
+        "model_type": args.model_type,
+        "output_dir": args.output_dir,
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "per_device_eval_batch_size": args.per_device_eval_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "num_train_epochs": args.num_train_epochs,
+        "learning_rate": args.learning_rate,
+        "lr_scheduler_type": args.lr_scheduler_type,
+        "warmup_ratio": args.warmup_ratio,
+        "weight_decay": args.weight_decay,
+        "fp16": args.fp16,
+        "tf32": args.tf32,
+        "use_asymmetric_loss": args.use_asymmetric_loss,
+        "use_combined_loss": args.use_combined_loss,
+        "loss_combination_ratio": args.loss_combination_ratio,
+        "max_length": args.max_length,
+        "random_seed": 42
+    }
+    scientific_logger.log_experiment_start(config)
     
     # Load model and tokenizer from local cache
     model, tokenizer = load_model_and_tokenizer_local(args.model_type)
@@ -488,7 +650,7 @@ def main():
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
             data_collator=data_collator,
-            compute_metrics=compute_metrics_with_thresholds,
+            compute_metrics=compute_comprehensive_metrics,
         )
     elif args.use_asymmetric_loss:
         print("🎯 Using Asymmetric Loss for better class imbalance handling")
@@ -498,7 +660,7 @@ def main():
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
             data_collator=data_collator,
-            compute_metrics=compute_metrics_with_thresholds,
+            compute_metrics=compute_comprehensive_metrics,
         )
     else:
         print("📊 Using standard BCE Loss")
@@ -508,7 +670,7 @@ def main():
             train_dataset=train_dataset,
             eval_dataset=val_dataset,
             data_collator=data_collator,
-            compute_metrics=compute_metrics_with_thresholds,
+            compute_metrics=compute_comprehensive_metrics,
         )
     
     # Train
@@ -523,25 +685,40 @@ def main():
     print("📊 Final evaluation...")
     eval_results = trainer.evaluate()
     
-    # Save evaluation results
+    # Log final evaluation
+    scientific_logger.log_evaluation(eval_results, epoch=args.num_train_epochs)
+    
+    # Save comprehensive evaluation results
     eval_report = {
+        "experiment_id": scientific_logger.experiment_id,
         "model": args.model_type,
+        "loss_function": "combined" if args.use_combined_loss else ("asymmetric" if args.use_asymmetric_loss else "bce"),
         "f1_micro": eval_results.get("eval_f1_micro", 0.0),
         "f1_macro": eval_results.get("eval_f1_macro", 0.0),
-        "f1_micro_t3": eval_results.get("eval_f1_micro_t3", 0.0),
-        "f1_macro_t3": eval_results.get("eval_f1_macro_t3", 0.0),
-        "f1_micro_t5": eval_results.get("eval_f1_micro_t5", 0.0),
-        "f1_macro_t5": eval_results.get("eval_f1_macro_t5", 0.0),
+        "f1_weighted": eval_results.get("eval_f1_weighted", 0.0),
+        "precision_micro": eval_results.get("eval_precision_micro", 0.0),
+        "precision_macro": eval_results.get("eval_precision_macro", 0.0),
+        "recall_micro": eval_results.get("eval_recall_micro", 0.0),
+        "recall_macro": eval_results.get("eval_recall_macro", 0.0),
+        "class_imbalance_ratio": eval_results.get("eval_class_imbalance_ratio", 0.0),
+        "prediction_entropy": eval_results.get("eval_prediction_entropy", 0.0),
         "eval_loss": eval_results.get("eval_loss", 0.0),
-        "training_args": vars(args)
+        "training_args": vars(args),
+        "all_metrics": eval_results
     }
     
     with open(os.path.join(args.output_dir, "eval_report.json"), "w") as f:
         json.dump(eval_report, f, indent=2)
     
+    # Log experiment completion
+    scientific_logger.log_experiment_end(eval_results)
+    
     print("✅ Training completed!")
     print(f"📈 Final F1 Macro: {eval_results.get('eval_f1_macro', 0.0):.4f}")
     print(f"📈 Final F1 Micro: {eval_results.get('eval_f1_micro', 0.0):.4f}")
+    print(f"📈 Final F1 Weighted: {eval_results.get('eval_f1_weighted', 0.0):.4f}")
+    print(f"📊 Class Imbalance Ratio: {eval_results.get('eval_class_imbalance_ratio', 0.0):.2f}")
+    print(f"🔬 Scientific log: {scientific_logger.log_file}")
     print(f"💾 Model saved to: {args.output_dir}")
 
 if __name__ == "__main__":
