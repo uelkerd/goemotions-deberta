@@ -91,6 +91,98 @@ class AsymmetricLoss(nn.Module):
 
         return -loss.sum()
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance
+    """
+    def __init__(self, alpha=0.25, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+def compute_class_weights(dataset_path):
+    """
+    Compute class weights based on inverse frequency
+    """
+    import json
+    from collections import Counter
+    
+    # Count emotion frequencies
+    emotion_counts = Counter()
+    total_samples = 0
+    
+    with open(dataset_path, 'r') as f:
+        for line in f:
+            item = json.loads(line)
+            labels = item['labels']
+            if isinstance(labels, int):
+                labels = [labels]
+            for label in labels:
+                if 0 <= label < len(EMOTION_LABELS):
+                    emotion_counts[label] += 1
+            total_samples += 1
+    
+    # Compute inverse frequency weights
+    class_weights = []
+    for i in range(len(EMOTION_LABELS)):
+        if emotion_counts[i] > 0:
+            weight = total_samples / (len(EMOTION_LABELS) * emotion_counts[i])
+            class_weights.append(weight)
+        else:
+            class_weights.append(1.0)  # Default weight for unseen classes
+    
+    return torch.tensor(class_weights, dtype=torch.float)
+
+class CombinedLossTrainer(Trainer):
+    """
+    Combined Trainer using ASL + Class Weighting + Focal Loss
+    """
+    def __init__(self, loss_combination_ratio=0.7, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05)
+        self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
+        self.loss_combination_ratio = loss_combination_ratio
+        
+        # Compute class weights from training data
+        train_path = "data/goemotions/train.jsonl"
+        self.class_weights = compute_class_weights(train_path)
+        print(f"📊 Class weights computed: {self.class_weights}")
+        print(f"🎯 Loss combination: {self.loss_combination_ratio} ASL + {1-self.loss_combination_ratio} Focal")
+    
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """
+        Combined loss: ASL + Class Weighting + Focal Loss
+        """
+        labels = inputs.get("labels")
+        # Forward pass
+        outputs = model(**inputs)
+        logits = outputs.get("logits")
+        
+        # Compute individual losses
+        asl_loss = self.asymmetric_loss(logits, labels)
+        
+        # Class-weighted focal loss
+        focal_loss = self.focal_loss(logits, labels)
+        class_weighted_focal = focal_loss * self.class_weights.mean()
+        
+        # Combine losses (configurable weighted combination)
+        combined_loss = self.loss_combination_ratio * asl_loss + (1 - self.loss_combination_ratio) * class_weighted_focal
+        
+        return (combined_loss, outputs) if return_outputs else combined_loss
+
 class AsymmetricLossTrainer(Trainer):
     """
     Custom Trainer that uses Asymmetric Loss instead of default BCE
@@ -318,6 +410,10 @@ def main():
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--use_asymmetric_loss", action="store_true", default=True, 
                        help="Use Asymmetric Loss for better class imbalance handling")
+    parser.add_argument("--use_combined_loss", action="store_true", default=False,
+                       help="Use Combined Loss (ASL + Class Weighting + Focal Loss) for maximum performance")
+    parser.add_argument("--loss_combination_ratio", type=float, default=0.7,
+                       help="Ratio of ASL to Focal Loss in combined strategy (default: 0.7)")
     
     args = parser.parse_args()
     
@@ -382,7 +478,19 @@ def main():
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
     # Choose trainer based on loss function
-    if args.use_asymmetric_loss:
+    if args.use_combined_loss:
+        print("🚀 Using Combined Loss (ASL + Class Weighting + Focal Loss) for maximum performance")
+        print(f"📊 Loss combination ratio: {args.loss_combination_ratio} ASL + {1-args.loss_combination_ratio} Focal")
+        trainer = CombinedLossTrainer(
+            loss_combination_ratio=args.loss_combination_ratio,
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics_with_thresholds,
+        )
+    elif args.use_asymmetric_loss:
         print("🎯 Using Asymmetric Loss for better class imbalance handling")
         trainer = AsymmetricLossTrainer(
             model=model,
