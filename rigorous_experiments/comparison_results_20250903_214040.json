@@ -1,0 +1,36 @@
+{
+  "experiment_id": "20250903_214040",
+  "timestamp": "2025-09-03T21:40:40.998868",
+  "results": {
+    "bce_baseline": {
+      "success": false,
+      "error": "Training failed (code 1)",
+      "stdout": "",
+      "stderr": "bash: line 1: conda: command not found\nbash: line 1: /etc/profile.d/conda.sh: No such file or directory\n"
+    },
+    "asymmetric_loss": {
+      "success": false,
+      "error": "Training failed (code 1)",
+      "stdout": "",
+      "stderr": "bash: line 1: conda: command not found\nbash: line 1: /etc/profile.d/conda.sh: No such file or directory\n"
+    },
+    "combined_loss_07": {
+      "success": false,
+      "error": "Training failed (code 1)",
+      "stdout": "",
+      "stderr": "bash: line 1: conda: command not found\nbash: line 1: /etc/profile.d/conda.sh: No such file or directory\n"
+    },
+    "combined_loss_05": {
+      "success": false,
+      "error": "Training failed (code 1)",
+      "stdout": "",
+      "stderr": "bash: line 1: conda: command not found\nbash: line 1: /etc/profile.d/conda.sh: No such file or directory\n"
+    },
+    "combined_loss_03": {
+      "success": false,
+      "error": "Training failed (code 1)",
+      "stdout": "",
+      "stderr": "bash: line 1: conda: command not found\nbash: line 1: /etc/profile.d/conda.sh: No such file or directory\n"
+    }
+  }
+}

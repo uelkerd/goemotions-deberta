@@ -151,8 +151,9 @@ class AsymmetricLoss(nn.Module):
         xs_pos = x_sigmoid
         xs_neg = 1 - x_sigmoid
 
-        # Asymmetric Clipping
+        # Symmetric Clipping
         if self.clip is not None and self.clip > 0:
+            xs_pos = (xs_pos + self.clip).clamp(max=1)
             xs_neg = (xs_neg + self.clip).clamp(max=1)
 
         # Basic CE calculation
@@ -177,7 +178,7 @@ class AsymmetricLoss(nn.Module):
                 one_sided_w = torch.pow(1 - pt, one_sided_gamma)
             loss = loss * one_sided_w
 
-        return -loss.sum()
+        return loss.sum()
 
 class FocalLoss(nn.Module):
     """
@@ -244,13 +245,13 @@ class CombinedLossTrainer(Trainer):
         self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
         self.loss_combination_ratio = loss_combination_ratio
-        
+
         # Compute class weights from training data
         train_path = "data/goemotions/train.jsonl"
         self.class_weights = compute_class_weights(train_path)
         print(f"📊 Class weights computed: {self.class_weights}")
         print(f"🎯 Loss combination: {self.loss_combination_ratio} ASL + {1-self.loss_combination_ratio} Focal")
-    
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Combined loss: ASL + Class Weighting + Focal Loss
@@ -259,18 +260,41 @@ class CombinedLossTrainer(Trainer):
         # Forward pass
         outputs = model(**inputs)
         logits = outputs.get("logits")
-        
+
         # Compute individual losses
         asl_loss = self.asymmetric_loss(logits, labels)
-        
+
         # Class-weighted focal loss
         focal_loss = self.focal_loss(logits, labels)
         class_weighted_focal = focal_loss * self.class_weights.mean()
-        
+
         # Combine losses (configurable weighted combination)
         combined_loss = self.loss_combination_ratio * asl_loss + (1 - self.loss_combination_ratio) * class_weighted_focal
-        
+
         return (combined_loss, outputs) if return_outputs else combined_loss
+
+    def training_step(self, model, inputs):
+        """
+        Override training_step to add gradient clipping
+        """
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+
+        if self.use_amp:
+            self.scaler.scale(loss).backward()
+        else:
+            self.accelerator.backward(loss)
+
+        # Add gradient clipping to prevent gradient explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        return loss.detach()
 
 class AsymmetricLossTrainer(Trainer):
     """
@@ -280,7 +304,7 @@ class AsymmetricLossTrainer(Trainer):
         super().__init__(*args, **kwargs)
         # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
         self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
-    
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Override compute_loss to use Asymmetric Loss
@@ -289,11 +313,34 @@ class AsymmetricLossTrainer(Trainer):
         # Forward pass
         outputs = model(**inputs)
         logits = outputs.get("logits")
-        
+
         # Use Asymmetric Loss instead of default loss
         loss = self.asymmetric_loss(logits, labels)
-        
+
         return (loss, outputs) if return_outputs else loss
+
+    def training_step(self, model, inputs):
+        """
+        Override training_step to add gradient clipping
+        """
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+
+        if self.use_amp:
+            self.scaler.scale(loss).backward()
+        else:
+            self.accelerator.backward(loss)
+
+        # Add gradient clipping to prevent gradient explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        return loss.detach()
 
 class JsonlMultiLabelDataset(Dataset):
     """Dataset for multi-label classification from JSONL files"""
