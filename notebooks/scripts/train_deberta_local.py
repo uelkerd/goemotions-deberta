@@ -178,7 +178,7 @@ class AsymmetricLoss(nn.Module):
                 one_sided_w = torch.pow(1 - pt, one_sided_gamma)
             loss = loss * one_sided_w
 
-        return loss.sum()
+        return -loss.mean()
 
 class FocalLoss(nn.Module):
     """
@@ -242,7 +242,7 @@ class CombinedLossTrainer(Trainer):
     def __init__(self, loss_combination_ratio=0.7, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.5, gamma_pos=1.0, clip=0.1, disable_torch_grad_focal_loss=True)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
         self.loss_combination_ratio = loss_combination_ratio
 
@@ -286,10 +286,7 @@ class CombinedLossTrainer(Trainer):
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
 
-        if self.use_amp:
-            self.scaler.scale(loss).backward()
-        else:
-            self.accelerator.backward(loss)
+        self.accelerator.backward(loss)
 
         # Add gradient clipping to prevent gradient explosion
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -303,7 +300,7 @@ class AsymmetricLossTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.5, gamma_pos=1.0, clip=0.1, disable_torch_grad_focal_loss=True)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -319,7 +316,7 @@ class AsymmetricLossTrainer(Trainer):
 
         return (loss, outputs) if return_outputs else loss
 
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch=None):
         """
         Override training_step to add gradient clipping
         """
@@ -327,15 +324,12 @@ class AsymmetricLossTrainer(Trainer):
         inputs = self._prepare_inputs(inputs)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
 
-        if self.use_amp:
-            self.scaler.scale(loss).backward()
-        else:
-            self.accelerator.backward(loss)
+        self.accelerator.backward(loss)
 
         # Add gradient clipping to prevent gradient explosion
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)

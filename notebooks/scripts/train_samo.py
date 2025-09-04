@@ -193,9 +193,9 @@ class ASLTrainer(Trainer):
         super().__init__(*args, **kwargs)
         # Initialize Asymmetric Loss with optimized parameters for GoEmotions
         self.loss_fct = AsymmetricLoss(
-            gamma_neg=2.0,    # Focus more on hard negatives
+            gamma_neg=1.5,    # Reduced focus on hard negatives to prevent over-prediction
             gamma_pos=1.0,    # Moderate focus on positives
-            clip=0.05,        # Clip negative predictions
+            clip=0.1,         # Increased clip to reduce over-prediction
             pos_alpha=1.0     # Balanced positive weight
         )
 

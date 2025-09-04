@@ -69,7 +69,7 @@ class AsymmetricLoss(nn.Module):
                 one_sided_w = torch.pow(1 - pt, one_sided_gamma)
             loss = loss * one_sided_w
 
-        return loss.sum()
+        return -loss.mean()
 
 class SmallTestDataset(Dataset):
     """Small dataset for testing ASL fixes"""
@@ -190,7 +190,7 @@ def test_asl_training():
         optimizer = torch.optim.AdamW(model_copy.parameters(), lr=1e-5)
         
         if config["use_asl"]:
-            loss_fn = AsymmetricLoss(gamma_neg=2.0, gamma_pos=1.0, clip=0.05, disable_torch_grad_focal_loss=True)
+            loss_fn = AsymmetricLoss(gamma_neg=1.5, gamma_pos=1.0, clip=0.1, disable_torch_grad_focal_loss=True)
         else:
             loss_fn = nn.BCEWithLogitsLoss()
         
