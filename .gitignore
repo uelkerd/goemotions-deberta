@@ -73,3 +73,27 @@ samo_out/
 # Temporary files
 *.tmp
 *.temp
+
+# Repository organization - prevent root directory clutter
+# Keep documentation in docs/
+*.md
+!README.md
+!docs/*.md
+
+# Keep scripts in notebooks/scripts/ only
+/scripts/
+
+# Prevent experiment clutter in root
+phase*_*/
+test_*/
+debug_*/
+*_out/
+*_experiments/
+rigorous_experiments/
+samo_*/
+deberta_*/
+
+# Temporary cleanup files
+*CLEANUP*
+*cleanup*
+*PLAN*
