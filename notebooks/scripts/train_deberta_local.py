@@ -131,7 +131,7 @@ class AsymmetricLoss(nn.Module):
     Asymmetric Loss for Multi-Label Classification
     Addresses class imbalance by down-weighting easy negatives while maintaining focus on hard positives
     """
-    def __init__(self, gamma_neg=2.0, gamma_pos=1.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
+    def __init__(self, gamma_neg=1.0, gamma_pos=1.0, clip=0.2, eps=1e-8, disable_torch_grad_focal_loss=False):
         super(AsymmetricLoss, self).__init__()
         self.gamma_neg = gamma_neg
         self.gamma_pos = gamma_pos
@@ -242,7 +242,7 @@ class CombinedLossTrainer(Trainer):
     def __init__(self, loss_combination_ratio=0.7, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.5, gamma_pos=1.0, clip=0.1, disable_torch_grad_focal_loss=True)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=True)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
         self.loss_combination_ratio = loss_combination_ratio
 
@@ -273,7 +273,7 @@ class CombinedLossTrainer(Trainer):
 
         return (combined_loss, outputs) if return_outputs else combined_loss
 
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch=None):
         """
         Override training_step to add gradient clipping
         """
@@ -281,7 +281,7 @@ class CombinedLossTrainer(Trainer):
         inputs = self._prepare_inputs(inputs)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -300,7 +300,7 @@ class AsymmetricLossTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.5, gamma_pos=1.0, clip=0.1, disable_torch_grad_focal_loss=True)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=True)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -436,14 +436,14 @@ def compute_comprehensive_metrics(eval_pred):
                     metrics[f"recall_{emotion}"] = recall_per_class[i]
                     metrics[f"f1_{emotion}"] = f1_per_class[i]
     
-    # Primary metrics (using 0.3 threshold)
-    metrics["f1_micro"] = metrics["f1_micro_t3"]
-    metrics["f1_macro"] = metrics["f1_macro_t3"]
-    metrics["f1_weighted"] = metrics["f1_weighted_t3"]
-    metrics["precision_micro"] = metrics["precision_micro_t3"]
-    metrics["precision_macro"] = metrics["precision_macro_t3"]
-    metrics["recall_micro"] = metrics["recall_micro_t3"]
-    metrics["recall_macro"] = metrics["recall_macro_t3"]
+    # Primary metrics (using 0.5 threshold for better precision)
+    metrics["f1_micro"] = metrics["f1_micro_t5"]
+    metrics["f1_macro"] = metrics["f1_macro_t5"]
+    metrics["f1_weighted"] = metrics["f1_weighted_t5"]
+    metrics["precision_micro"] = metrics["precision_micro_t5"]
+    metrics["precision_macro"] = metrics["precision_macro_t5"]
+    metrics["recall_micro"] = metrics["recall_micro_t5"]
+    metrics["recall_macro"] = metrics["recall_macro_t5"]
     
     # Statistical analysis
     metrics["class_imbalance_ratio"] = compute_class_imbalance_ratio(labels)
