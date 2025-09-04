@@ -273,7 +273,7 @@ class CombinedLossTrainer(Trainer):
 
         return (combined_loss, outputs) if return_outputs else combined_loss
 
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch=None):
         """
         Override training_step to add gradient clipping
         """
@@ -281,7 +281,7 @@ class CombinedLossTrainer(Trainer):
         inputs = self._prepare_inputs(inputs)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
