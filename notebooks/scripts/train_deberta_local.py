@@ -23,9 +23,11 @@ os.environ["HF_TOKEN"] = "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"
 # os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Temporarily disable offline mode for model loading
 
 # NCCL configuration to prevent timeouts
-os.environ["NCCL_TIMEOUT"] = "3600"  # 1 hour timeout
+os.environ["NCCL_TIMEOUT"] = "1800"  # 30 min timeout (reduced from 1 hour)
 os.environ["NCCL_BLOCKING_WAIT"] = "1"  # Enable blocking wait
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"  # Better error handling
+os.environ["NCCL_IB_DISABLE"] = "1"  # Disable InfiniBand (causes issues on some systems)
+os.environ["NCCL_SOCKET_IFNAME"] = "lo"  # Use localhost interface only
 
 from typing import List, Dict, Any
 import torch
@@ -57,6 +59,30 @@ def set_seeds(seed=42):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+class ProgressMonitorCallback:
+    """
+    Monitors training progress and detects stalls
+    """
+    def __init__(self, stall_timeout=600):  # 10 minutes timeout
+        self.last_progress_time = time.time()
+        self.stall_timeout = stall_timeout
+        self.last_step = 0
+
+    def on_step_end(self, args, state, control, **kwargs):
+        current_time = time.time()
+        if state.global_step != self.last_step:
+            self.last_progress_time = current_time
+            self.last_step = state.global_step
+
+        # Check for stall
+        if current_time - self.last_progress_time > self.stall_timeout:
+            print(f"⚠️ Training stall detected! No progress for {self.stall_timeout} seconds at step {state.global_step}")
+            print("🔄 Attempting to save checkpoint and exit gracefully...")
+            control.should_training_stop = True
+            return control
+
+        return control
 
 class ScientificLogger:
     """
@@ -826,6 +852,7 @@ def main():
             eval_dataset=val_dataset,
             data_collator=data_collator,
             compute_metrics=compute_comprehensive_metrics,
+            callbacks=[ProgressMonitorCallback()],
         )
         
         # Replace training dataset with oversampled version
@@ -844,6 +871,7 @@ def main():
             eval_dataset=val_dataset,
             data_collator=data_collator,
             compute_metrics=compute_comprehensive_metrics,
+            callbacks=[ProgressMonitorCallback()],
         )
     else:
         print("📊 Using standard BCE Loss")
@@ -854,11 +882,19 @@ def main():
             eval_dataset=val_dataset,
             data_collator=data_collator,
             compute_metrics=compute_comprehensive_metrics,
+            callbacks=[ProgressMonitorCallback()],
         )
     
-    # Train
+    # Train with error handling and progress monitoring
     print("🚀 Starting training...")
-    trainer.train()
+    try:
+        trainer.train()
+    except Exception as e:
+        print(f"❌ Training failed with error: {e}")
+        print("🔍 Error details:", str(e))
+        import traceback
+        traceback.print_exc()
+        return
     
     # Save final model
     trainer.save_model()
