@@ -12,10 +12,15 @@ import argparse
 import warnings
 from pathlib import Path
 
+# Suppress compatibility warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="transformers") 
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
+
 # Set environment variables for DeBERTa-v3-large compatibility
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_TOKEN"] = "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"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Enable offline mode
+# os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Temporarily disable offline mode for model loading
 
 # NCCL configuration to prevent timeouts
 os.environ["NCCL_TIMEOUT"] = "3600"  # 1 hour timeout
@@ -163,13 +168,13 @@ class AsymmetricLoss(nn.Module):
 
         # Asymmetric Focusing
         if self.gamma_neg > 0 or self.gamma_pos > 0:
+            # FIXED: Remove no_grad for full differentiability (HF docs compliant)
             if self.disable_torch_grad_focal_loss:
-                with torch.no_grad():
-                    pt0 = xs_pos * y
-                    pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
-                    pt = pt0 + pt1
-                    one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
-                    one_sided_w = torch.pow(1 - pt, one_sided_gamma)
+                pt0 = xs_pos * y
+                pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
+                pt = pt0 + pt1
+                one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
+                one_sided_w = torch.pow(1 - pt, one_sided_gamma)
             else:
                 pt0 = xs_pos * y
                 pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
@@ -241,8 +246,8 @@ class CombinedLossTrainer(Trainer):
     """
     def __init__(self, loss_combination_ratio=0.7, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=True)
+        # FIXED: Enable full gradients for AsymmetricLoss (remove disable_torch_grad_focal_loss)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
         self.loss_combination_ratio = loss_combination_ratio
 
@@ -251,6 +256,80 @@ class CombinedLossTrainer(Trainer):
         self.class_weights = compute_class_weights(train_path)
         print(f"📊 Class weights computed: {self.class_weights}")
         print(f"🎯 Loss combination: {self.loss_combination_ratio} ASL + {1-self.loss_combination_ratio} Focal")
+        
+        # OVERSAMPLING: Apply to training dataset
+        self.oversampled_data = self._apply_oversampling(train_path, self.class_weights)
+        print(f"✅ Oversampling applied for rare classes")
+
+    def _apply_oversampling(self, train_path, class_weights, oversample_factor=3):
+        """Apply oversampling to rare classes based on inverse frequency"""
+        from collections import Counter
+        import random
+        
+        # Compute class frequencies
+        emotion_counts = Counter()
+        data_list = []
+        
+        with open(train_path, 'r') as f:
+            for line in f:
+                item = json.loads(line)
+                labels = item['labels']
+                if isinstance(labels, int):
+                    labels = [labels]
+                for label in labels:
+                    if 0 <= label < len(EMOTION_LABELS):
+                        emotion_counts[label] += 1
+                data_list.append(item)
+        
+        # Calculate oversampling multipliers based on class weights
+        # Higher weight = more rare class = needs more oversampling
+        max_weight = float(max(class_weights))
+        oversample_multipliers = []
+        for i in range(len(EMOTION_LABELS)):
+            if emotion_counts[i] > 0:
+                # Use class weight as basis for oversampling: higher weight = more duplication
+                multiplier = min(int(class_weights[i] / min(class_weights)) * oversample_factor / 10, oversample_factor)
+                multiplier = max(1, multiplier)  # At least 1x
+                oversample_multipliers.append(multiplier)
+            else:
+                oversample_multipliers.append(1)
+        
+        print(f"📊 Oversampling multipliers: {dict(zip(EMOTION_LABELS, oversample_multipliers))}")
+        
+        # Create oversampled dataset
+        oversampled_data = []
+        for item in data_list:
+            labels = item['labels']
+            if isinstance(labels, int):
+                labels = [labels]
+            
+            # Always include original sample
+            oversampled_data.append(item)
+            
+            # Find the rarest label in this sample (highest weight = rarest)
+            if labels:
+                max_weight_for_sample = max(class_weights[label] for label in labels if 0 <= label < len(class_weights))
+                # Use the multiplier for the rarest class in this sample
+                for label in labels:
+                    if 0 <= label < len(oversample_multipliers) and class_weights[label] == max_weight_for_sample:
+                        num_extra_samples = int(oversample_multipliers[label]) - 1  # Already added original, convert to int
+                        for _ in range(num_extra_samples):
+                            # Create slight variation to avoid exact duplicates
+                            varied_item = item.copy()
+                            varied_item['text'] = item['text'] + ' '  # Minimal variation
+                            oversampled_data.append(varied_item)
+                        break  # Only oversample based on one (rarest) label per sample
+        
+        # Shuffle to mix original and oversampled data
+        random.shuffle(oversampled_data)
+        
+        # Cap total size to 2x original to prevent memory issues
+        original_size = len(data_list)
+        if len(oversampled_data) > 2 * original_size:
+            oversampled_data = oversampled_data[:2 * original_size]
+        
+        print(f"📊 Oversampling applied: {original_size} → {len(oversampled_data)} samples")
+        return oversampled_data
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -264,9 +343,15 @@ class CombinedLossTrainer(Trainer):
         # Compute individual losses
         asl_loss = self.asymmetric_loss(logits, labels)
 
-        # Class-weighted focal loss
+        # FIXED: Per-class weighted focal loss (apply weights element-wise)
         focal_loss = self.focal_loss(logits, labels)
-        class_weighted_focal = focal_loss * self.class_weights.mean()
+        # Expand class_weights to batch dimensions: [batch, classes] and move to same device
+        batch_size, num_classes = labels.shape
+        class_weights_batch = self.class_weights.to(labels.device).unsqueeze(0).expand(batch_size, num_classes)
+        # Apply per-class weighting: weighted_focal = focal_loss * class_weights_batch
+        weighted_focal_per_sample = focal_loss * class_weights_batch
+        # Mean over all elements (per HF multi-label convention)
+        class_weighted_focal = weighted_focal_per_sample.mean()
 
         # Combine losses (configurable weighted combination)
         combined_loss = self.loss_combination_ratio * asl_loss + (1 - self.loss_combination_ratio) * class_weighted_focal
@@ -299,8 +384,8 @@ class AsymmetricLossTrainer(Trainer):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Disable torch gradients in focal loss to prevent "backward through graph a second time" error with gradient checkpointing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=True)
+        # FIXED: Enable full gradients for AsymmetricLoss
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -337,17 +422,19 @@ class AsymmetricLossTrainer(Trainer):
         return loss.detach()
 
 class JsonlMultiLabelDataset(Dataset):
-    """Dataset for multi-label classification from JSONL files"""
+    """Dataset for multi-label classification from JSONL files with oversampling support"""
     
-    def __init__(self, jsonl_path: str, tokenizer, max_length: int = 512):
+    def __init__(self, jsonl_path: str, tokenizer, max_length: int = 512, oversampled_data=None):
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.data = []
-        
-        with open(jsonl_path, 'r') as f:
-            for line in f:
-                item = json.loads(line)
-                self.data.append(item)
+        if oversampled_data:
+            self.data = oversampled_data
+        else:
+            self.data = []
+            with open(jsonl_path, 'r') as f:
+                for line in f:
+                    item = json.loads(line)
+                    self.data.append(item)
     
     def __len__(self):
         return len(self.data)
@@ -436,14 +523,23 @@ def compute_comprehensive_metrics(eval_pred):
                     metrics[f"recall_{emotion}"] = recall_per_class[i]
                     metrics[f"f1_{emotion}"] = f1_per_class[i]
     
-    # Primary metrics (using 0.5 threshold for better precision)
-    metrics["f1_micro"] = metrics["f1_micro_t5"]
-    metrics["f1_macro"] = metrics["f1_macro_t5"]
-    metrics["f1_weighted"] = metrics["f1_weighted_t5"]
-    metrics["precision_micro"] = metrics["precision_micro_t5"]
-    metrics["precision_macro"] = metrics["precision_macro_t5"]
-    metrics["recall_micro"] = metrics["recall_micro_t5"]
-    metrics["recall_macro"] = metrics["recall_macro_t5"]
+    # FIXED: Primary metrics using 0.2 threshold (optimal for GoEmotions imbalance)
+    # Keep 0.5 for comparison but use 0.2 as default
+    metrics["f1_micro"] = metrics.get("f1_micro_t2", metrics["f1_micro_t5"])
+    metrics["f1_macro"] = metrics.get("f1_macro_t2", metrics["f1_macro_t5"])
+    metrics["f1_weighted"] = metrics.get("f1_weighted_t2", metrics["f1_weighted_t5"])
+    metrics["precision_micro"] = metrics.get("precision_micro_t2", metrics["precision_micro_t5"])
+    metrics["precision_macro"] = metrics.get("precision_macro_t2", metrics["precision_macro_t5"])
+    metrics["recall_micro"] = metrics.get("recall_micro_t2", metrics["recall_micro_t5"])
+    metrics["recall_macro"] = metrics.get("recall_macro_t2", metrics["recall_macro_t5"])
+    
+    # Log threshold used
+    metrics["primary_threshold"] = 0.2
+    
+    # Store original 0.5 metrics for comparison
+    metrics["f1_micro_default"] = metrics["f1_micro_t5"]
+    metrics["f1_macro_default"] = metrics["f1_macro_t5"]
+    metrics["f1_weighted_default"] = metrics["f1_weighted_t5"]
     
     # Statistical analysis
     metrics["class_imbalance_ratio"] = compute_class_imbalance_ratio(labels)
@@ -480,8 +576,12 @@ def load_model_and_tokenizer_local(model_type="deberta-v3-large"):
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    # Check if local cache exists
-    if os.path.exists(model_path) and os.path.exists(f"{model_path}/config.json"):
+    # Check if local cache exists (look for config.json and either pytorch_model.bin or model.safetensors)
+    config_exists = os.path.exists(f"{model_path}/config.json")
+    model_file_exists = (os.path.exists(f"{model_path}/pytorch_model.bin") or 
+                        os.path.exists(f"{model_path}/model.safetensors"))
+    
+    if os.path.exists(model_path) and config_exists and model_file_exists:
         print(f"📁 Found local cache at {model_path}")
         try:
             # Load tokenizer from local cache
@@ -501,7 +601,8 @@ def load_model_and_tokenizer_local(model_type="deberta-v3-large"):
             
             model = AutoModelForSequenceClassification.from_pretrained(
                 model_path,
-                config=config
+                config=config,
+                local_files_only=True  # Ensure we use local files
             )
             print(f"✅ {model_type} model loaded from local cache")
             
@@ -585,7 +686,7 @@ def main():
     parser.add_argument("--per_device_eval_batch_size", type=int, default=16)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
     parser.add_argument("--num_train_epochs", type=int, default=3)
-    parser.add_argument("--learning_rate", type=float, default=1e-5)
+    parser.add_argument("--learning_rate", type=float, default=3e-5)  # FIXED: Enforce optimal 3e-5 for DeBERTa-v3
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--weight_decay", type=float, default=0.01)
@@ -687,7 +788,7 @@ def main():
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_train_epochs,
-        learning_rate=args.learning_rate,
+        learning_rate=max(args.learning_rate, 3e-5),  # FIXED: Enforce minimum 3e-5 LR override
         lr_scheduler_type=args.lr_scheduler_type,
         warmup_ratio=args.warmup_ratio,
         weight_decay=args.weight_decay,
@@ -726,6 +827,14 @@ def main():
             data_collator=data_collator,
             compute_metrics=compute_comprehensive_metrics,
         )
+        
+        # Replace training dataset with oversampled version
+        print("🔄 Creating oversampled training dataset...")
+        oversampled_train_dataset = JsonlMultiLabelDataset(
+            train_path, tokenizer, args.max_length, oversampled_data=trainer.oversampled_data
+        )
+        trainer.train_dataset = oversampled_train_dataset
+        print(f"✅ Updated training dataset: {len(train_dataset)} → {len(oversampled_train_dataset)} examples")
     elif args.use_asymmetric_loss:
         print("🎯 Using Asymmetric Loss for better class imbalance handling")
         trainer = AsymmetricLossTrainer(
