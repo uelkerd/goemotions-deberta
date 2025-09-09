@@ -429,6 +429,55 @@ class FocalLoss(nn.Module):
         else:
             return focal_loss
 
+class BaseGradNormTrainer(Trainer):
+    """
+    Trainer base class that unifies pre/post gradient-norm measurement and clipping
+    across all loss variants, using Accelerate's clip_grad_norm_ for consistency.
+    """
+
+    def training_step(self, model, inputs, num_items_in_batch: int | None = None):
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()
+
+        # Backward with Accelerate (handles fp16/bf16)
+        self.accelerator.backward(loss)
+
+        # Measure pre-clip grad norm with unscaled grads via Accelerate
+        try:
+            pre_clip_norm = self.accelerator.clip_grad_norm_(model.parameters(), max_norm=float("inf"))
+        except Exception:
+            pre_clip_norm = float("nan")
+
+        # Apply clipping using TrainingArguments.max_grad_norm (default to 1.0 if None)
+        max_norm = getattr(self.args, "max_grad_norm", None)
+        if max_norm is None:
+            max_norm = 1.0
+        try:
+            post_clip_norm = self.accelerator.clip_grad_norm_(model.parameters(), max_norm=float(max_norm))
+        except Exception:
+            post_clip_norm = float("nan")
+
+        # Log both norms for consistent monitoring (will be aggregated by logging_steps)
+        # Ensure plain floats for JSON serialization
+        def _to_float(x):
+            try:
+                return float(x)
+            except Exception:
+                return float("nan")
+
+        self.log({
+            "grad_norm_pre_clip": _to_float(pre_clip_norm),
+            "grad_norm_post_clip": _to_float(post_clip_norm),
+        })
+
+        return loss.detach()
+
 def compute_class_weights(dataset_path):
     """
     Compute class weights based on inverse frequency
@@ -462,7 +511,7 @@ def compute_class_weights(dataset_path):
     
     return torch.tensor(class_weights, dtype=torch.float)
 
-class CombinedLossTrainer(Trainer):
+class CombinedLossTrainer(BaseGradNormTrainer):
     """
     Combined Trainer using ASL + Class Weighting + Focal Loss
     """
@@ -591,27 +640,9 @@ class CombinedLossTrainer(Trainer):
 
         return (combined_loss, outputs) if return_outputs else combined_loss
 
-    def training_step(self, model, inputs, num_items_in_batch=None):
-        """
-        Override training_step to add gradient clipping
-        """
-        model.train()
-        inputs = self._prepare_inputs(inputs)
+    # training_step inherited from BaseGradNormTrainer for unified behavior
 
-        with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
-
-        if self.args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
-        self.accelerator.backward(loss)
-
-        # Add gradient clipping to prevent gradient explosion
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-        return loss.detach()
-
-class AsymmetricLossTrainer(Trainer):
+class AsymmetricLossTrainer(BaseGradNormTrainer):
     """
     Custom Trainer that uses Asymmetric Loss instead of default BCE
     """
@@ -634,25 +665,7 @@ class AsymmetricLossTrainer(Trainer):
 
         return (loss, outputs) if return_outputs else loss
 
-    def training_step(self, model, inputs, num_items_in_batch=None):
-        """
-        Override training_step to add gradient clipping
-        """
-        model.train()
-        inputs = self._prepare_inputs(inputs)
-
-        with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
-
-        if self.args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
-        self.accelerator.backward(loss)
-
-        # Add gradient clipping to prevent gradient explosion
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-        return loss.detach()
+    # training_step inherited from BaseGradNormTrainer for unified behavior
 
 class JsonlMultiLabelDataset(Dataset):
     """Dataset for multi-label classification from JSONL files with oversampling support"""
@@ -1065,6 +1078,7 @@ def main():
         ddp_find_unused_parameters=False,  # Optimize DDP performance
         dataloader_num_workers=0,  # Reduce worker processes to avoid NCCL issues
         skip_memory_metrics=True,  # Skip memory metrics to reduce overhead
+        max_grad_norm=1.0,
     )
     
     # Data collator
@@ -1132,7 +1146,16 @@ def main():
         )
     else:
         print("📊 Using standard BCE Loss")
-        trainer = Trainer(
+        # Use a minimal BCE trainer that inherits BaseGradNormTrainer for logging
+        class BCETrainer(BaseGradNormTrainer):
+            def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+                labels = inputs.get("labels")
+                outputs = model(**inputs)
+                logits = outputs.get("logits")
+                loss = F.binary_cross_entropy_with_logits(logits, labels)
+                return (loss, outputs) if return_outputs else loss
+
+        trainer = BCETrainer(
             model=model,
             args=training_args,
             train_dataset=train_dataset,
