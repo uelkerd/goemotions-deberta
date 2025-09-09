@@ -364,7 +364,7 @@ class AsymmetricLoss(nn.Module):
     Asymmetric Loss for Multi-Label Classification
     Addresses class imbalance by down-weighting easy negatives while maintaining focus on hard positives
     """
-    def __init__(self, gamma_neg=4.0, gamma_pos=0.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
+    def __init__(self, gamma_neg=2.0, gamma_pos=0.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
         super(AsymmetricLoss, self).__init__()
         self.gamma_neg = gamma_neg
         self.gamma_pos = gamma_pos
@@ -467,8 +467,8 @@ class CombinedLossTrainer(Trainer):
     """
     def __init__(self, loss_combination_ratio=0.7, gamma=2.0, label_smoothing=0.1, per_class_weights=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # FIXED: Use proper ASL parameters from official implementation  
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05, disable_torch_grad_focal_loss=False)
+        # FIXED: Use conservative ASL parameters to prevent gradient vanishing
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=0.0, clip=0.05, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
         self.combined_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing) if label_smoothing > 0 else nn.CrossEntropyLoss()
         self.loss_combination_ratio = loss_combination_ratio
@@ -618,8 +618,8 @@ class AsymmetricLossTrainer(Trainer):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # FIXED: Use proper ASL parameters from official implementation
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05)
+        # FIXED: Use conservative ASL parameters to prevent gradient vanishing  
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=0.0, clip=0.05)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
