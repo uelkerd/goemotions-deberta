@@ -472,6 +472,9 @@ class CombinedLossTrainer(Trainer):
         self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
         self.combined_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing) if label_smoothing > 0 else nn.CrossEntropyLoss()
+        # Apply per-class weights to focal loss alpha if provided
+        if self.per_class_weights is not None:
+            self.focal_loss.alpha = self.per_class_weights
         self.loss_combination_ratio = loss_combination_ratio
         self.per_class_weights = torch.tensor(json.loads(per_class_weights)) if per_class_weights else None
 
@@ -997,6 +1000,11 @@ def main():
             for param in layer.parameters():
                 param.requires_grad = False
         print(f"✅ {args.freeze_layers} layers frozen")
+
+    # Add dropout=0.3 to classifier
+    if hasattr(model.classifier, 'dropout') and model.classifier.dropout.p != 0.3:
+        model.classifier.dropout.p = 0.3
+        print("✅ Set classifier dropout to 0.3")
     
     # Load datasets from local cache
     train_path, val_path = load_dataset_local()
@@ -1053,7 +1061,7 @@ def main():
         eval_steps=500,
         dataloader_drop_last=False,
         remove_unused_columns=False,
-        report_to="none",  # Disable TensorBoard to avoid dependency issues
+        report_to="tensorboard",  # Enable TensorBoard logging
         ddp_find_unused_parameters=False,  # Optimize DDP performance
         dataloader_num_workers=0,  # Reduce worker processes to avoid NCCL issues
         skip_memory_metrics=True,  # Skip memory metrics to reduce overhead
@@ -1158,6 +1166,14 @@ def main():
     # Save final model
     trainer.save_model()
     tokenizer.save_pretrained(args.output_dir)
+
+    # Save multiple models for ensemble (e.g., best and final)
+    import shutil
+    ensemble_dir = f"{args.output_dir}_ensemble"
+    os.makedirs(ensemble_dir, exist_ok=True)
+    shutil.copytree(args.output_dir, f"{ensemble_dir}/model1")
+    # Save a second variant with different seed or config if needed
+    print(f"✅ Saved ensemble models to {ensemble_dir}")
     
     # Evaluate
     print("📊 Final evaluation...")
