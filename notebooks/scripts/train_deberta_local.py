@@ -364,7 +364,7 @@ class AsymmetricLoss(nn.Module):
     Asymmetric Loss for Multi-Label Classification
     Addresses class imbalance by down-weighting easy negatives while maintaining focus on hard positives
     """
-    def __init__(self, gamma_neg=1.0, gamma_pos=1.0, clip=0.2, eps=1e-8, disable_torch_grad_focal_loss=False):
+    def __init__(self, gamma_neg=4.0, gamma_pos=0.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
         super(AsymmetricLoss, self).__init__()
         self.gamma_neg = gamma_neg
         self.gamma_pos = gamma_pos
@@ -472,6 +472,7 @@ class CombinedLossTrainer(Trainer):
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
         self.combined_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing) if label_smoothing > 0 else nn.CrossEntropyLoss()
         self.loss_combination_ratio = loss_combination_ratio
+        self.label_smoothing = label_smoothing  # CRITICAL FIX: Missing assignment
         self.per_class_weights = torch.tensor(json.loads(per_class_weights)) if per_class_weights else None
         
         # Apply per-class weights to focal loss alpha if provided
@@ -1171,7 +1172,7 @@ def main():
     import shutil
     ensemble_dir = f"{args.output_dir}_ensemble"
     os.makedirs(ensemble_dir, exist_ok=True)
-    shutil.copytree(args.output_dir, f"{ensemble_dir}/model1")
+    shutil.copytree(args.output_dir, f"{ensemble_dir}/model1", dirs_exist_ok=True)
     # Save a second variant with different seed or config if needed
     print(f"✅ Saved ensemble models to {ensemble_dir}")
     
