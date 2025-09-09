@@ -1,0 +1,174 @@
+/bin/bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)
+[NbConvertApp] Converting notebook notebooks/GoEmotions_DeBERTa_IMPROVED.ipynb to notebook
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/dist-packages/jupyter_core/utils/__init__.py", line 154, in wrapped
+    asyncio.get_running_loop()
+RuntimeError: no running event loop
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/bin/jupyter-nbconvert", line 8, in <module>
+    sys.exit(main())
+  File "/usr/local/lib/python3.10/dist-packages/jupyter_core/application.py", line 284, in launch_instance
+    super().launch_instance(argv=argv, **kwargs)
+  File "/usr/local/lib/python3.10/dist-packages/traitlets/config/application.py", line 1075, in launch_instance
+    app.start()
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/nbconvertapp.py", line 420, in start
+    self.convert_notebooks()
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/nbconvertapp.py", line 597, in convert_notebooks
+    self.convert_single_notebook(notebook_filename)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/nbconvertapp.py", line 563, in convert_single_notebook
+    output, resources = self.export_single_notebook(
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/nbconvertapp.py", line 487, in export_single_notebook
+    output, resources = self.exporter.from_filename(
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/exporters/exporter.py", line 201, in from_filename
+    return self.from_file(f, resources=resources, **kw)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/exporters/exporter.py", line 220, in from_file
+    return self.from_notebook_node(
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/exporters/notebook.py", line 36, in from_notebook_node
+    nb_copy, resources = super().from_notebook_node(nb, resources, **kw)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/exporters/exporter.py", line 154, in from_notebook_node
+    nb_copy, resources = self._preprocess(nb_copy, resources)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/exporters/exporter.py", line 353, in _preprocess
+    nbc, resc = preprocessor(nbc, resc)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/preprocessors/base.py", line 48, in __call__
+    return self.preprocess(nb, resources)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/preprocessors/execute.py", line 103, in preprocess
+    self.preprocess_cell(cell, resources, index)
+  File "/usr/local/lib/python3.10/dist-packages/nbconvert/preprocessors/execute.py", line 124, in preprocess_cell
+    cell = self.execute_cell(cell, index, store_history=True)
+  File "/usr/local/lib/python3.10/dist-packages/jupyter_core/utils/__init__.py", line 158, in wrapped
+    return loop.run_until_complete(inner)
+  File "/usr/lib/python3.10/asyncio/base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "/usr/local/lib/python3.10/dist-packages/nbclient/client.py", line 1062, in async_execute_cell
+    await self._check_raise_for_error(cell, cell_index, exec_reply)
+  File "/usr/local/lib/python3.10/dist-packages/nbclient/client.py", line 918, in _check_raise_for_error
+    raise CellExecutionError.from_cell_and_msg(cell, exec_reply_content)
+nbclient.exceptions.CellExecutionError: An error occurred while executing the following cell:
+------------------
+# Install missing packages for enhanced workflow (added sentence-transformers for SMOTE embeddings)
+
+import warnings
+warnings.filterwarnings('ignore')
+
+%pip install --quiet optuna>=3.0.0 nlpaug>=1.1.0 imbalanced-learn>=0.10.0 deepspeed>=0.12.0 sentence-transformers
+# Verify installations
+import optuna
+
+print(f"Optuna {optuna.__version__} installed successfully")
+
+import nlpaug
+
+print(f"nlpaug {nlpaug.__version__} installed successfully")
+
+from imblearn.over_sampling import SMOTE
+
+print("SMOTE from imbalanced-learn installed successfully")
+
+import contextlib
+import os
+with contextlib.redirect_stderr(open(os.devnull, 'w')):
+    import deepspeed
+
+print(f"DeepSpeed {deepspeed.__version__} installed successfully")
+
+print("✅ All dependencies installed and verified for deberta-v3 environment")
+# Verify sentence-transformers installation (added for SMOTE embeddings)
+try:
+    from sentence_transformers import SentenceTransformer
+    print("SentenceTransformer available")
+except ImportError as e:
+    print(f"SentenceTransformer import failed: {e}")
+
+# Fallback pip installs if conda fails (user site-packages)
+
+%pip install --user optuna nlpaug imbalanced-learn deepspeed sentence-transformers
+------------------
+
+----- stdout -----
+/bin/bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)
+----- stdout -----
+[33mWARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.[0m[33m
+[0m
+----- stdout -----
+Note: you may need to restart the kernel to use updated packages.
+----- stdout -----
+Optuna 4.5.0 installed successfully
+----- stdout -----
+nlpaug 1.1.11 installed successfully
+----- stdout -----
+SMOTE from imbalanced-learn installed successfully
+[2025-09-09 15:19:17,013] [INFO] [real_accelerator.py:260:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+----- stdout -----
+[WARNING] ZenFlow disabled: torch internal optimizer symbols could not be imported: cannot import name '_disable_dynamo_if_unsupported' from 'torch.optim.optimizer' (/venv/main/lib/python3.10/site-packages/torch/optim/optimizer.py)
+------------------
+
+[0;31m---------------------------------------------------------------------------[0m
+[0;31mNameError[0m                                 Traceback (most recent call last)
+Cell [0;32mIn[1], line 23[0m
+[1;32m     21[0m [38;5;28;01mimport[39;00m[38;5;250m [39m[38;5;21;01mos[39;00m
+[1;32m     22[0m [38;5;28;01mwith[39;00m contextlib[38;5;241m.[39mredirect_stderr([38;5;28mopen[39m(os[38;5;241m.[39mdevnull, [38;5;124m'[39m[38;5;124mw[39m[38;5;124m'[39m)):
+[0;32m---> 23[0m     [38;5;28;01mimport[39;00m[38;5;250m [39m[38;5;21;01mdeepspeed[39;00m
+[1;32m     25[0m [38;5;28mprint[39m([38;5;124mf[39m[38;5;124m"[39m[38;5;124mDeepSpeed [39m[38;5;132;01m{[39;00mdeepspeed[38;5;241m.[39m__version__[38;5;132;01m}[39;00m[38;5;124m installed successfully[39m[38;5;124m"[39m)
+[1;32m     27[0m [38;5;28mprint[39m([38;5;124m"[39m[38;5;124m✅ All dependencies installed and verified for deberta-v3 environment[39m[38;5;124m"[39m)
+
+File [0;32m/venv/main/lib/python3.10/site-packages/deepspeed/__init__.py:25[0m
+[1;32m     22[0m [38;5;28;01melse[39;00m:
+[1;32m     23[0m     HAS_TRITON [38;5;241m=[39m [38;5;28;01mFalse[39;00m
+[0;32m---> 25[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m ops
+[1;32m     26[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m module_inject
+[1;32m     28[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;21;01maccelerator[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m get_accelerator
+
+File [0;32m/venv/main/lib/python3.10/site-packages/deepspeed/ops/__init__.py:6[0m
+[1;32m      1[0m [38;5;66;03m# Copyright (c) Microsoft Corporation.[39;00m
+[1;32m      2[0m [38;5;66;03m# SPDX-License-Identifier: Apache-2.0[39;00m
+[1;32m      3[0m 
+[1;32m      4[0m [38;5;66;03m# DeepSpeed Team[39;00m
+[0;32m----> 6[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m adam
+[1;32m      7[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m adagrad
+[1;32m      8[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m lamb
+
+File [0;32m/venv/main/lib/python3.10/site-packages/deepspeed/ops/adam/__init__.py:9[0m
+[1;32m      7[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;21;01mfused_adam[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m FusedAdam
+[1;32m      8[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;21;01mzenflow_cpu_adam[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m ZenFlowCPUAdam
+[0;32m----> 9[0m [38;5;28;01mfrom[39;00m[38;5;250m [39m[38;5;21;01m.[39;00m[38;5;21;01mzenflow_torch_adam[39;00m[38;5;250m [39m[38;5;28;01mimport[39;00m ZenFlowSelectiveAdamW
+
+File [0;32m/venv/main/lib/python3.10/site-packages/deepspeed/ops/adam/zenflow_torch_adam.py:685[0m
+[1;32m    681[0m         [38;5;28;01mif[39;00m device_found_inf [38;5;129;01mis[39;00m [38;5;129;01mnot[39;00m [38;5;28;01mNone[39;00m:
+[1;32m    682[0m             torch[38;5;241m.[39m_foreach_sub_(device_state_steps, [device_found_inf] [38;5;241m*[39m [38;5;28mlen[39m(device_state_steps))
+[0;32m--> 685[0m [38;5;129m@_disable_dynamo_if_unsupported[39m(single_tensor_fn[38;5;241m=[39m_single_tensor_adamw)
+[1;32m    686[0m [38;5;28;01mdef[39;00m[38;5;250m [39m[38;5;21madamw[39m(
+[1;32m    687[0m     params: List[Tensor],
+[1;32m    688[0m     grads: List[Tensor],
+[1;32m    689[0m     exp_avgs: List[Tensor],
+[1;32m    690[0m     exp_avg_sqs: List[Tensor],
+[1;32m    691[0m     max_exp_avg_sqs: List[Tensor],
+[1;32m    692[0m     state_steps: List[Tensor],
+[1;32m    693[0m     [38;5;66;03m# kwonly args with defaults are not supported by functions compiled with torchscript issue #70627[39;00m
+[1;32m    694[0m     [38;5;66;03m# setting this as kwarg for now as functional API is compiled by torch/distributed/optim[39;00m
+[1;32m    695[0m     foreach: Optional[[38;5;28mbool[39m] [38;5;241m=[39m [38;5;28;01mNone[39;00m,
+[1;32m    696[0m     capturable: [38;5;28mbool[39m [38;5;241m=[39m [38;5;28;01mFalse[39;00m,
+[1;32m    697[0m     differentiable: [38;5;28mbool[39m [38;5;241m=[39m [38;5;28;01mFalse[39;00m,
+[1;32m    698[0m     fused: Optional[[38;5;28mbool[39m] [38;5;241m=[39m [38;5;28;01mNone[39;00m,
+[1;32m    699[0m     grad_scale: Optional[Tensor] [38;5;241m=[39m [38;5;28;01mNone[39;00m,
+[1;32m    700[0m     found_inf: Optional[Tensor] [38;5;241m=[39m [38;5;28;01mNone[39;00m,
+[1;32m    701[0m     has_complex: [38;5;28mbool[39m [38;5;241m=[39m [38;5;28;01mFalse[39;00m,
+[1;32m    702[0m     [38;5;241m*[39m,
+[1;32m    703[0m     amsgrad: [38;5;28mbool[39m,
+[1;32m    704[0m     beta1: [38;5;28mfloat[39m,
+[1;32m    705[0m     beta2: [38;5;28mfloat[39m,
+[1;32m    706[0m     lr: Union[[38;5;28mfloat[39m, Tensor],
+[1;32m    707[0m     weight_decay: [38;5;28mfloat[39m,
+[1;32m    708[0m     eps: [38;5;28mfloat[39m,
+[1;32m    709[0m     maximize: [38;5;28mbool[39m,
+[1;32m    710[0m ):
+[1;32m    711[0m [38;5;250m    [39m[38;5;124mr[39m[38;5;124;03m"""Functional API that performs AdamW algorithm computation.[39;00m
+[1;32m    712[0m 
+[1;32m    713[0m [38;5;124;03m    See :class:`~torch.optim.AdamW` for details.[39;00m
+[1;32m    714[0m [38;5;124;03m    """[39;00m
+[1;32m    715[0m     [38;5;28;01mif[39;00m [38;5;129;01mnot[39;00m _ZENFLOW_AVAILABLE:
+
+[0;31mNameError[0m: name '_disable_dynamo_if_unsupported' is not defined
+

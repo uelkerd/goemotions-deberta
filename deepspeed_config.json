@@ -1,0 +1,1 @@
+{"zero_optimization": {"stage": 2}, "fp16": {"enabled": true}, "train_micro_batch_size_per_gpu": 4}
