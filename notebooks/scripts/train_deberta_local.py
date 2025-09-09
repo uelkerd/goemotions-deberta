@@ -472,11 +472,12 @@ class CombinedLossTrainer(Trainer):
         self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
         self.combined_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing) if label_smoothing > 0 else nn.CrossEntropyLoss()
+        self.loss_combination_ratio = loss_combination_ratio
+        self.per_class_weights = torch.tensor(json.loads(per_class_weights)) if per_class_weights else None
+        
         # Apply per-class weights to focal loss alpha if provided
         if self.per_class_weights is not None:
             self.focal_loss.alpha = self.per_class_weights
-        self.loss_combination_ratio = loss_combination_ratio
-        self.per_class_weights = torch.tensor(json.loads(per_class_weights)) if per_class_weights else None
 
         # Compute class weights from training data
         train_path = "data/goemotions/train.jsonl"
