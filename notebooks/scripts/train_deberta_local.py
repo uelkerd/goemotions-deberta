@@ -385,14 +385,13 @@ class AsymmetricLoss(nn.Module):
         xs_pos = x_sigmoid
         xs_neg = 1 - x_sigmoid
 
-        # Symmetric Clipping
+        # Asymmetric Clipping (only clip negatives, per official ASL paper)
         if self.clip is not None and self.clip > 0:
-            xs_pos = (xs_pos + self.clip).clamp(max=1)
             xs_neg = (xs_neg + self.clip).clamp(max=1)
 
-        # Basic CE calculation
-        los_pos = y * torch.log(xs_pos.clamp(min=self.eps))
-        los_neg = (1 - y) * torch.log(xs_neg.clamp(min=self.eps))
+        # Basic CE calculation (add small eps to prevent log(0))
+        los_pos = y * torch.log(xs_pos + self.eps)
+        los_neg = (1 - y) * torch.log(xs_neg + self.eps)
         loss = los_pos + los_neg
 
         # Asymmetric Focusing - FIXED implementation to ensure gradient flow
@@ -405,7 +404,7 @@ class AsymmetricLoss(nn.Module):
             one_sided_w = torch.pow(1 - pt, one_sided_gamma)
             loss = loss * one_sided_w
 
-        return -loss.mean()
+        return -loss.mean()  # Keep negative for multi-label CE convention
 
 class FocalLoss(nn.Module):
     """
@@ -468,8 +467,8 @@ class CombinedLossTrainer(Trainer):
     """
     def __init__(self, loss_combination_ratio=0.7, gamma=2.0, label_smoothing=0.1, per_class_weights=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # FIXED: Enable full gradients for AsymmetricLoss (remove disable_torch_grad_focal_loss)
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
+        # FIXED: Use proper ASL parameters from official implementation  
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
         self.combined_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing) if label_smoothing > 0 else nn.CrossEntropyLoss()
         self.loss_combination_ratio = loss_combination_ratio
@@ -608,7 +607,7 @@ class CombinedLossTrainer(Trainer):
         self.accelerator.backward(loss)
 
         # Add gradient clipping to prevent gradient explosion
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
         return loss.detach()
 
@@ -618,8 +617,8 @@ class AsymmetricLossTrainer(Trainer):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # FIXED: Enable full gradients for AsymmetricLoss
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2)
+        # FIXED: Use proper ASL parameters from official implementation
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -651,7 +650,7 @@ class AsymmetricLossTrainer(Trainer):
         self.accelerator.backward(loss)
 
         # Add gradient clipping to prevent gradient explosion
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
         return loss.detach()
 
