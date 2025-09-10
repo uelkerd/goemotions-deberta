@@ -470,7 +470,7 @@ class CombinedLossTrainer(Trainer):
         # FIXED: Use conservative ASL parameters to prevent gradient vanishing
         self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=0.0, clip=0.05, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
-        self.combined_loss = nn.CrossEntropyLoss(label_smoothing=label_smoothing) if label_smoothing > 0 else nn.CrossEntropyLoss()
+        self.combined_loss = nn.BCEWithLogitsLoss()
         self.loss_combination_ratio = loss_combination_ratio
         self.label_smoothing = label_smoothing  # CRITICAL FIX: Missing assignment
         self.per_class_weights = torch.tensor(json.loads(per_class_weights)) if per_class_weights else None
@@ -491,74 +491,64 @@ class CombinedLossTrainer(Trainer):
         self.oversampled_data = self._apply_oversampling(train_path, self.class_weights)
         print(f"✅ Oversampling applied for rare classes")
 
-    def _apply_oversampling(self, train_path, class_weights, oversample_factor=3):
-        """Apply oversampling to rare classes based on inverse frequency"""
-        from collections import Counter
+    def _apply_oversampling(self, train_path, class_weights, oversample_factor=1.5):
+        """Apply stratified oversampling to rare classes while preserving data integrity"""
+        from collections import Counter, defaultdict
         import random
+        from sklearn.utils import resample  # For stratified-like sampling
         
-        # Compute class frequencies
-        emotion_counts = Counter()
+        # Load and analyze data
         data_list = []
+        samples_by_class = defaultdict(list)
         
         with open(train_path, 'r') as f:
             for line in f:
-                item = json.loads(line)
+                item = json.loads(line.strip())
                 labels = item['labels']
                 if isinstance(labels, int):
                     labels = [labels]
-                for label in labels:
-                    if 0 <= label < len(EMOTION_LABELS):
-                        emotion_counts[label] += 1
+                # Ensure valid labels
+                valid_labels = [l for l in labels if 0 <= l < len(EMOTION_LABELS)]
+                if not valid_labels:
+                    valid_labels = [27]  # Default to neutral if invalid
+                item['labels'] = valid_labels  # Normalize
                 data_list.append(item)
+                for label in valid_labels:
+                    samples_by_class[label].append(item)
         
-        # Calculate oversampling multipliers based on class weights
-        # Higher weight = more rare class = needs more oversampling
-        max_weight = float(max(class_weights))
-        oversample_multipliers = []
-        for i in range(len(EMOTION_LABELS)):
-            if emotion_counts[i] > 0:
-                # Use class weight as basis for oversampling: higher weight = more duplication
-                multiplier = min(int(class_weights[i] / min(class_weights)) * oversample_factor / 10, oversample_factor)
-                multiplier = max(1, multiplier)  # At least 1x
-                oversample_multipliers.append(multiplier)
-            else:
-                oversample_multipliers.append(1)
-        
-        print(f"📊 Oversampling multipliers: {dict(zip(EMOTION_LABELS, oversample_multipliers))}")
-        
-        # Create oversampled dataset
-        oversampled_data = []
-        for item in data_list:
-            labels = item['labels']
-            if isinstance(labels, int):
-                labels = [labels]
-            
-            # Always include original sample
-            oversampled_data.append(item)
-            
-            # Find the rarest label in this sample (highest weight = rarest)
-            if labels:
-                max_weight_for_sample = max(class_weights[label] for label in labels if 0 <= label < len(class_weights))
-                # Use the multiplier for the rarest class in this sample
-                for label in labels:
-                    if 0 <= label < len(oversample_multipliers) and class_weights[label] == max_weight_for_sample:
-                        num_extra_samples = int(oversample_multipliers[label]) - 1  # Already added original, convert to int
-                        for _ in range(num_extra_samples):
-                            # Create slight variation to avoid exact duplicates
-                            varied_item = item.copy()
-                            varied_item['text'] = item['text'] + ' '  # Minimal variation
-                            oversampled_data.append(varied_item)
-                        break  # Only oversample based on one (rarest) label per sample
-        
-        # Shuffle to mix original and oversampled data
-        random.shuffle(oversampled_data)
-        
-        # Cap total size to 2x original to prevent memory issues
         original_size = len(data_list)
-        if len(oversampled_data) > 2 * original_size:
-            oversampled_data = oversampled_data[:2 * original_size]
         
-        print(f"📊 Oversampling applied: {original_size} → {len(oversampled_data)} samples")
+        # Identify rare classes (bottom 50% frequency)
+        class_freq = {i: len(samples_by_class[i]) for i in range(len(EMOTION_LABELS)) if i in samples_by_class}
+        sorted_classes = sorted(class_freq.items(), key=lambda x: x[1])
+        median_freq = sorted_classes[len(sorted_classes)//2][1] if sorted_classes else 1
+        rare_classes = [cls for cls, freq in sorted_classes if freq < median_freq]
+        
+        print(f"📊 Rare classes identified: {rare_classes} (threshold: {median_freq} samples)")
+        
+        # Oversample rare classes using resample (stratified by class presence)
+        oversampled_data = data_list.copy()
+        for rare_class in rare_classes:
+            rare_samples = samples_by_class[rare_class]
+            if len(rare_samples) > 0:
+                # Resample to target size (original + factor * original for rare)
+                target_size = int(len(rare_samples) * oversample_factor)
+                additional_samples = resample(
+                    rare_samples, n_samples=target_size - len(rare_samples),
+                    random_state=42, replace=True
+                )
+                # No text variation to avoid tokenization issues; duplicates are fine for training
+                oversampled_data.extend(additional_samples)
+                print(f"📈 Oversampled class {EMOTION_LABELS[rare_class]}: {len(rare_samples)} → {target_size}")
+        
+        # Shuffle and cap to prevent excessive size (1.5x max for stability)
+        random.shuffle(oversampled_data)
+        max_size = int(original_size * 1.5)
+        if len(oversampled_data) > max_size:
+            oversampled_data = oversampled_data[:max_size]
+            print(f"⚖️ Capped oversampled dataset at {max_size} samples for stability")
+        
+        print(f"✅ Stratified oversampling applied: {original_size} → {len(oversampled_data)} samples")
         return oversampled_data
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
@@ -569,6 +559,7 @@ class CombinedLossTrainer(Trainer):
         # Forward pass
         outputs = model(**inputs)
         logits = outputs.get("logits")
+
 
         # Compute individual losses
         asl_loss = self.asymmetric_loss(logits, labels)
@@ -585,7 +576,12 @@ class CombinedLossTrainer(Trainer):
 
         # Label smoothing on BCE component
         bce_loss = F.binary_cross_entropy_with_logits(logits, labels, reduction='mean')
-        smoothed_bce = self.combined_loss(logits.view(-1, logits.size(-1)), labels.view(-1).long()) if self.label_smoothing > 0 else bce_loss
+        if self.label_smoothing > 0:
+            num_classes = labels.shape[-1]
+            smoothed_labels = labels * (1.0 - self.label_smoothing) + self.label_smoothing / num_classes
+            smoothed_bce = F.binary_cross_entropy_with_logits(logits, smoothed_labels, reduction='mean')
+        else:
+            smoothed_bce = bce_loss
 
         # Combine losses (configurable weighted combination)
         combined_loss = self.loss_combination_ratio * asl_loss + (1 - self.loss_combination_ratio) * class_weighted_focal + 0.2 * smoothed_bce
@@ -624,13 +620,33 @@ class AsymmetricLossTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Override compute_loss to use Asymmetric Loss
+        FIXED: Added shape validation for multi-label consistency
         """
         labels = inputs.get("labels")
+        if labels is None:
+            raise ValueError("Labels not found in inputs")
+        
+        # Ensure labels are float (multi-label binary)
+        if labels.dtype != torch.float:
+            labels = labels.float()
+        
         # Forward pass
         outputs = model(**inputs)
         logits = outputs.get("logits")
-
-        # Use Asymmetric Loss instead of default loss
+        if logits is None:
+            raise ValueError("Logits not found in outputs")
+        
+        # Shape validation
+        if logits.shape != labels.shape:
+            raise ValueError(f"Shape mismatch: logits {logits.shape}, labels {labels.shape}. Expected [batch, 28]")
+        if logits.shape[-1] != len(EMOTION_LABELS):
+            raise ValueError(f"Expected {len(EMOTION_LABELS)} classes, got {logits.shape[-1]}")
+        
+        # Debug print
+        if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
+            print(f"DEBUG ASL: Batch shapes - logits: {logits.shape}, labels: {labels.shape}")
+        
+        # Use Asymmetric Loss (BCE-based, no cross_entropy)
         loss = self.asymmetric_loss(logits, labels)
 
         return (loss, outputs) if return_outputs else loss
@@ -678,23 +694,26 @@ class JsonlMultiLabelDataset(Dataset):
         text = item['text']
         labels = item['labels']
         
-        # Ensure labels is a list of integers (emotion indices)
+        # Ensure labels is a list of valid integers
         if isinstance(labels, int):
             labels = [labels]
         elif not isinstance(labels, list):
             labels = list(labels)
+        # Filter invalid labels
+        valid_labels = [l for l in labels if isinstance(l, int) and 0 <= l < len(EMOTION_LABELS)]
+        if not valid_labels:
+            valid_labels = [27]  # Default to neutral
         
-        # Convert to multi-label format (28-dimensional binary vector)
+        # Convert to multi-label format (28-dimensional binary vector, float32)
         label_vector = [0.0] * len(EMOTION_LABELS)
-        for label_idx in labels:
-            if 0 <= label_idx < len(EMOTION_LABELS):
-                label_vector[label_idx] = 1.0
+        for label_idx in valid_labels:
+            label_vector[label_idx] = 1.0
         
-        # Tokenize
+        # Tokenize (avoid max_length padding here; let collator handle dynamic padding)
         encoding = self.tokenizer(
             text,
             truncation=True,
-            padding='max_length',
+            padding=False,  # Changed: Let DataCollatorWithPadding handle padding for efficiency
             max_length=self.max_length,
             return_tensors='pt'
         )
@@ -702,7 +721,7 @@ class JsonlMultiLabelDataset(Dataset):
         return {
             'input_ids': encoding['input_ids'].flatten(),
             'attention_mask': encoding['attention_mask'].flatten(),
-            'labels': torch.tensor(label_vector, dtype=torch.float)
+            'labels': torch.tensor(label_vector, dtype=torch.float32)  # Explicit float32 for multi-label
         }
 
 def compute_comprehensive_metrics(eval_pred):
@@ -1068,8 +1087,26 @@ def main():
         skip_memory_metrics=True,  # Skip memory metrics to reduce overhead
     )
     
-    # Data collator
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    # Data collator with explicit multi-label support
+    data_collator = DataCollatorWithPadding(
+        tokenizer=tokenizer,
+        padding=True,
+        max_length=args.max_length,
+        pad_to_multiple_of=8 if args.fp16 else None,  # Optimize for mixed precision
+        return_tensors="pt"
+    )
+    
+    # Ensure labels are not padded/truncated incorrectly
+    def custom_collator(features):
+        batch = data_collator(features)
+        if 'labels' in batch:
+            # Ensure labels remain [batch_size, 28] float, no padding on labels
+            if batch['labels'].shape[-1] != len(EMOTION_LABELS):
+                raise ValueError(f"Labels shape mismatch after collation: {batch['labels'].shape}")
+            batch['labels'] = batch['labels'].float()
+        return batch
+    
+    data_collator = custom_collator
     
     from transformers import EarlyStoppingCallback
 
@@ -1113,13 +1150,14 @@ def main():
             callbacks=callbacks,
         )
         
-        # Replace training dataset with oversampled version
+        # FIXED: Integrate oversampling directly during trainer init (no post-replacement)
         print("🔄 Creating oversampled training dataset...")
         oversampled_train_dataset = JsonlMultiLabelDataset(
             train_path, tokenizer, args.max_length, oversampled_data=trainer.oversampled_data
         )
+        print(f"✅ Oversampled training dataset: {len(oversampled_train_dataset)} examples")
+        # Use oversampled from init
         trainer.train_dataset = oversampled_train_dataset
-        print(f"✅ Updated training dataset: {len(train_dataset)} → {len(oversampled_train_dataset)} examples")
     elif args.use_asymmetric_loss:
         print("🎯 Using Asymmetric Loss for better class imbalance handling")
         trainer = AsymmetricLossTrainer(
