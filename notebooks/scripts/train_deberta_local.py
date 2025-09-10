@@ -1096,7 +1096,7 @@ def main():
     )
     
     # Data collator with explicit multi-label support
-    data_collator = DataCollatorWithPadding(
+    base_data_collator = DataCollatorWithPadding(
         tokenizer=tokenizer,
         padding=True,
         max_length=args.max_length,
@@ -1106,7 +1106,7 @@ def main():
     
     # Ensure labels are not padded/truncated incorrectly
     def custom_collator(features):
-        batch = data_collator(features)
+        batch = base_data_collator(features)
         if 'labels' in batch:
             # Ensure labels remain [batch_size, 28] float, no padding on labels
             if batch['labels'].shape[-1] != len(EMOTION_LABELS):
