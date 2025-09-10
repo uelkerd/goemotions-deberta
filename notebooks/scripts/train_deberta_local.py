@@ -364,7 +364,7 @@ class AsymmetricLoss(nn.Module):
     Asymmetric Loss for Multi-Label Classification
     Addresses class imbalance by down-weighting easy negatives while maintaining focus on hard positives
     """
-    def __init__(self, gamma_neg=2.0, gamma_pos=0.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
+    def __init__(self, gamma_neg=1.0, gamma_pos=0.0, clip=0.05, eps=1e-8, disable_torch_grad_focal_loss=False):
         super(AsymmetricLoss, self).__init__()
         self.gamma_neg = gamma_neg
         self.gamma_pos = gamma_pos
@@ -468,7 +468,7 @@ class CombinedLossTrainer(Trainer):
     def __init__(self, loss_combination_ratio=0.7, gamma=2.0, label_smoothing=0.1, per_class_weights=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # FIXED: Use conservative ASL parameters to prevent gradient vanishing
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=0.0, clip=0.05, disable_torch_grad_focal_loss=False)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=0.0, clip=0.05, disable_torch_grad_focal_loss=False)
         self.focal_loss = FocalLoss(alpha=0.25, gamma=gamma, reduction='mean')
         self.combined_loss = nn.BCEWithLogitsLoss()
         self.loss_combination_ratio = loss_combination_ratio
@@ -566,11 +566,19 @@ class CombinedLossTrainer(Trainer):
 
         # FIXED: Per-class weighted focal loss (apply weights element-wise)
         focal_loss = self.focal_loss(logits, labels)
+        # Ensure focal_loss is per-sample, not scalar
+        if focal_loss.dim() == 0:  # If scalar, expand to per-sample
+            focal_loss = focal_loss.expand(labels.shape[0])
+        elif focal_loss.dim() == 2:  # If [batch, classes], take mean per sample
+            focal_loss = focal_loss.mean(dim=1)
+        
         # Expand class_weights to batch dimensions: [batch, classes] and move to same device
         batch_size, num_classes = labels.shape
         class_weights_batch = self.class_weights.to(labels.device).unsqueeze(0).expand(batch_size, num_classes)
-        # Apply per-class weighting: weighted_focal = focal_loss * class_weights_batch
-        weighted_focal_per_sample = focal_loss * class_weights_batch
+        
+        # Apply per-class weighting: use mean class weight per sample
+        mean_class_weights = class_weights_batch.mean(dim=1)  # [batch_size]
+        weighted_focal_per_sample = focal_loss * mean_class_weights
         # Mean over all elements (per HF multi-label convention)
         class_weighted_focal = weighted_focal_per_sample.mean()
 
@@ -615,7 +623,7 @@ class AsymmetricLossTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # FIXED: Use conservative ASL parameters to prevent gradient vanishing  
-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=2.0, gamma_pos=0.0, clip=0.05)
+        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=0.0, clip=0.05)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
