@@ -1,8 +1,8 @@
 {
   "dataset": "combined_emotion_classification",
-  "train_size": 43778,
-  "val_size": 5518,
-  "total_size": 49296,
+  "train_size": 43978,
+  "val_size": 5568,
+  "total_size": 49546,
   "emotions": [
     "admiration",
     "amusement",
@@ -36,11 +36,11 @@
   "emotion_count": 28,
   "datasets_included": [
     "goemotions",
-    "semeval_synthetic",
-    "isear_synthetic",
-    "meld_synthetic"
+    "semeval_realistic",
+    "isear_realistic",
+    "meld_realistic"
   ],
-  "created_at": "2025-09-13T11:36:53.987403",
+  "created_at": "2025-09-13T11:45:42.300901",
   "emotion_mapping": {
     "goemotions": {
       "admiration": 0,
