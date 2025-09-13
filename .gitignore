@@ -1,3 +1,5 @@
+# GoEmotions DeBERTa Project .gitignore
+
 # Python
 __pycache__/
 *.py[cod]
@@ -21,10 +23,61 @@ wheels/
 *.egg
 MANIFEST
 
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Environment variables
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
 .env
 .venv
 env/
@@ -33,14 +86,78 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Machine Learning / Data Science
+# Model files (large files)
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.model
+*.weights
+*.pt
+*.pth
+*.pb
+*.onnx
+*.joblib
+*.pkl.z
+*.pkl.gz
+
+# Large datasets
+data/raw/
+data/processed/
+data/external/
+*.csv
+*.tsv
+*.jsonl
+!data/README.md
+
+# Checkpoints and models
+checkpoints*/
+models/
+outputs/models/
+outputs/checkpoints/
+*.safetensors
+
+# Logs
+logs/
+*.log
+execution_log.txt
+output.log
+.log
+
+# Temporary files
+temp/
+tmp/
+.cache/
+*.tmp
+*.temp
+
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -49,51 +166,13 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Logs
-*.log
-logs/
-.logs/
+# Project specific
+# Keep small configuration files but ignore large outputs
+!outputs/README.md
+!outputs/.gitkeep
+!outputs/evaluations/
+!outputs/plots/
+!outputs/exports/
 
-# Model outputs and checkpoints
-*.pth
-*.pt
-*.bin
-*.safetensors
-checkpoints/
-models/
-outputs/
-samo_out/
-
-# Data files (uncomment if you don't want to track large datasets)
-# *.csv
-# *.json
-# *.parquet
-# data/
-
-# Temporary files
-*.tmp
-*.temp
-
-# Repository organization - prevent root directory clutter
-# Keep documentation in docs/
-*.md
-!README.md
-!docs/*.md
-
-# Keep scripts in notebooks/scripts/ only
-/scripts/
-
-# Prevent experiment clutter in root
-phase*_*/
-test_*/
-debug_*/
-*_out/
-*_experiments/
-rigorous_experiments/
-samo_*/
-deberta_*/
-
-# Temporary cleanup files
-*CLEANUP*
-*cleanup*
-*PLAN*
+# Google Drive rclone config
+.rclone.conf

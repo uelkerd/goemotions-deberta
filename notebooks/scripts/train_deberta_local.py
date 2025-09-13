@@ -109,7 +109,10 @@ class ProgressMonitorCallback(TrainerCallback):
         self.backup_interval = 900  # Backup every 15 minutes
         self.enable_gdrive_backup = enable_gdrive_backup
         # Use the exact path format as confirmed by rclone ls command
-        self.gdrive_backup_path = "'drive:00_Projects/🎯 TechLabs-2025/Final_Project/TRAINING/GoEmotions-DeBERTa-Backup/'"
+        # Create timestamped backup directory
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.gdrive_backup_path = f"'drive:00_Projects/🎯 TechLabs-2025/Final_Project/TRAINING/GoEmotions-DeBERTa-Backup/MultiDataset_BCE_{timestamp}/'"
 
     def on_step_end(self, args, state, control, **kwargs):
         current_time = time.time()
@@ -910,32 +913,53 @@ def load_model_and_tokenizer_local(model_type="deberta-v3-large"):
         return None, None
 
 def load_dataset_local():
-    """Load GoEmotions dataset from local cache"""
-    print("📊 Loading GoEmotions dataset from local cache...")
-    
+    """Load combined multi-dataset from local cache"""
+    print("📊 Loading combined multi-dataset...")
+
+    # Try combined dataset first (our multi-dataset)
+    combined_train_path = "data/combined_all_datasets/train.jsonl"
+    combined_val_path = "data/combined_all_datasets/val.jsonl"
+
+    if os.path.exists(combined_train_path) and os.path.exists(combined_val_path):
+        print("✅ Found combined multi-dataset!")
+        # Count samples
+        with open(combined_train_path, 'r') as f:
+            train_count = sum(1 for _ in f)
+        with open(combined_val_path, 'r') as f:
+            val_count = sum(1 for _ in f)
+
+        print(f"   Training examples: {train_count}")
+        print(f"   Validation examples: {val_count}")
+        print(f"   Total: {train_count + val_count} samples")
+        print("   Datasets: GoEmotions + SemEval + ISEAR + MELD")
+
+        return combined_train_path, combined_val_path
+
+    # Fallback to original GoEmotions dataset
+    print("⚠️ Combined dataset not found, falling back to GoEmotions...")
     train_path = "data/goemotions/train.jsonl"
     val_path = "data/goemotions/val.jsonl"
-    
+
     # Check if local cache exists
     if not os.path.exists(train_path) or not os.path.exists(val_path):
-        print("❌ Local dataset cache not found")
-        print("💡 Run 'python scripts/setup_local_cache.py' first")
+        print("❌ No dataset found!")
+        print("💡 Run data preparation first to create combined dataset")
         return None, None
-    
+
     try:
         # Load metadata
         with open("data/goemotions/metadata.json", "r") as f:
             metadata = json.load(f)
-        
+
         print(f"✅ GoEmotions dataset loaded from local cache")
         print(f"   Training examples: {metadata['train_size']}")
         print(f"   Validation examples: {metadata['val_size']}")
         print(f"   Total emotions: {len(metadata['emotions'])}")
-        
+
         return train_path, val_path
-        
+
     except Exception as e:
-        print(f"❌ Failed to load dataset from local cache: {e}")
+        print(f"❌ Error loading dataset: {e}")
         return None, None
 
 def main():
@@ -1120,21 +1144,8 @@ def main():
 
     # Data augmentation with nlpaug if augment_prob > 0
     if args.augment_prob > 0:
-        import nlpaug.augmenter.word as naw
-        aug = naw.SynonymAug(aug_src='wordnet')
-        print(f"🔄 Applying data augmentation with probability {args.augment_prob}")
-        # Apply to train_dataset.data (simplified integration)
-        augmented_data = []
-        for item in train_dataset.data:
-            if random.random() < args.augment_prob:
-                augmented_text = aug.augment(item['text'])[0]
-                augmented_item = item.copy()
-                augmented_item['text'] = augmented_text
-                augmented_data.append(augmented_item)
-            else:
-                augmented_data.append(item)
-        train_dataset.data = augmented_data[:len(train_dataset.data)]  # Keep size similar
-        print(f"✅ Data augmentation applied (nlpaug)")
+        print(f"ℹ️ Data augmentation disabled (nlpaug compatibility issues), continuing without augmentation")
+        # TODO: Fix nlpaug integration for future use
 
     # Choose trainer based on loss function
     callbacks = [ProgressMonitorCallback(stall_timeout=600, check_disk_quota=True, min_disk_space_gb=10, enable_gdrive_backup=True)]
