@@ -97,17 +97,19 @@ class ProgressMonitorCallback(TrainerCallback):
     """
     Monitors training progress and detects stalls
     """
-    def __init__(self, stall_timeout=600, check_disk_quota=True, min_disk_space_gb=10, enable_gdrive_backup=True):  # 10 minutes timeout
+    def __init__(self, stall_timeout=600, check_disk_quota=True, min_disk_space_gb=5, enable_gdrive_backup=True):  # 10 minutes timeout
         self.last_progress_time = time.time()
         self.stall_timeout = stall_timeout
         self.last_step = 0
         self.last_disk_check_time = time.time()
-        self.disk_check_interval = 300  # Check disk space every 5 minutes
+        self.disk_check_interval = 60  # Check disk space every 1 minute (more frequent)
         self.check_disk_quota = check_disk_quota
         self.min_disk_space_gb = min_disk_space_gb
         self.last_backup_time = time.time()
-        self.backup_interval = 900  # Backup every 15 minutes
+        self.backup_interval = 120  # Backup every 2 minutes (much more frequent)
         self.enable_gdrive_backup = enable_gdrive_backup
+        self.immediate_cleanup = os.environ.get('IMMEDIATE_CLEANUP', 'true').lower() == 'true'
+        self.max_local_checkpoints = int(os.environ.get('MAX_LOCAL_CHECKPOINTS', '1'))
         # Create configurable backup directory (no emojis, flexible path)
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -147,7 +149,10 @@ class ProgressMonitorCallback(TrainerCallback):
         if self.enable_gdrive_backup and current_time - self.last_backup_time > self.backup_interval:
             self.last_backup_time = current_time
             self._backup_to_gdrive(args)
-        
+            # Clean up local checkpoints after successful backup
+            if self.immediate_cleanup:
+                self._cleanup_after_backup(args)
+
         return control
         
     def _check_disk_space(self, args):
@@ -165,12 +170,14 @@ class ProgressMonitorCallback(TrainerCallback):
             
             # If disk space is low, clean up old checkpoints
             if free_space_gb < self.min_disk_space_gb or used_percent > 85:
-                print(f"⚠️ Low disk space detected! Cleaning old checkpoints...")
-                self._cleanup_old_checkpoints(args.output_dir)
+                print(f"⚠️ LOW DISK SPACE: Only {free_space_gb:.1f}GB free! Cleaning old checkpoints...")
+                self._cleanup_old_checkpoints(args.output_dir, aggressive=True)
+            elif free_space_gb < self.min_disk_space_gb * 2:  # Warning threshold
+                print(f"🟡 DISK SPACE WARNING: Only {free_space_gb:.1f}GB free. Consider cleanup.")
         except Exception as e:
             print(f"⚠️ Error checking disk space: {str(e)}")
-    
-    def _cleanup_old_checkpoints(self, output_dir):
+
+    def _cleanup_old_checkpoints(self, output_dir, aggressive=False):
         """Remove old checkpoint directories except the latest"""
         try:
             import os
@@ -196,17 +203,65 @@ class ProgressMonitorCallback(TrainerCallback):
             # Sort by step (ascending)
             checkpoint_steps.sort()
             
-            # Keep the latest 2 checkpoints, delete the rest
-            for step, checkpoint in checkpoint_steps[:-2]:  # Keep latest 2
-                print(f"🗑️ Removing old checkpoint: {checkpoint}")
+            # Determine how many checkpoints to keep based on mode
+            keep_count = 1 if aggressive else self.max_local_checkpoints
+
+            # Keep only the specified number of latest checkpoints
+            for step, checkpoint in checkpoint_steps[:-keep_count] if keep_count > 0 else checkpoint_steps:
+                size_mb = self._get_dir_size_mb(checkpoint)
+                print(f"🗑️ Removing old checkpoint: {checkpoint} ({size_mb:.1f}MB)")
                 try:
                     import shutil
                     shutil.rmtree(checkpoint)
+                    print(f"  ✅ Successfully removed {checkpoint}")
                 except Exception as e:
                     print(f"  ⚠️ Failed to remove {checkpoint}: {str(e)}")
         except Exception as e:
             print(f"⚠️ Error cleaning checkpoints: {str(e)}")
-    
+
+    def _get_dir_size_mb(self, path):
+        """Get directory size in MB"""
+        try:
+            import os
+            total_size = 0
+            for dirpath, dirnames, filenames in os.walk(path):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    if os.path.exists(filepath):
+                        total_size += os.path.getsize(filepath)
+            return total_size / (1024 * 1024)  # Convert to MB
+        except:
+            return 0.0
+
+    def _cleanup_after_backup(self, args):
+        """Clean up local checkpoints after successful backup to cloud"""
+        if not self.immediate_cleanup:
+            return
+
+        try:
+            print(f"🧹 Cleaning up local checkpoints after cloud backup...")
+            self._cleanup_old_checkpoints(args.output_dir, aggressive=True)
+
+            # Also clean up any temporary files
+            import glob
+            temp_files = glob.glob(os.path.join(args.output_dir, "tmp_*"))
+            temp_files.extend(glob.glob(os.path.join(args.output_dir, "*.tmp")))
+
+            for temp_file in temp_files:
+                try:
+                    if os.path.isfile(temp_file):
+                        os.remove(temp_file)
+                        print(f"🗑️ Removed temp file: {os.path.basename(temp_file)}")
+                    elif os.path.isdir(temp_file):
+                        import shutil
+                        shutil.rmtree(temp_file)
+                        print(f"🗑️ Removed temp dir: {os.path.basename(temp_file)}")
+                except Exception as e:
+                    print(f"⚠️ Failed to remove temp file {temp_file}: {str(e)}")
+
+        except Exception as e:
+            print(f"⚠️ Error during post-backup cleanup: {str(e)}")
+
     def _save_checkpoint(self, args, state):
         """Force save a checkpoint when training stalls"""
         try:
