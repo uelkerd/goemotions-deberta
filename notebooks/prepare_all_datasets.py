@@ -20,6 +20,13 @@ from collections import Counter, defaultdict
 import numpy as np
 from sklearn.model_selection import train_test_split
 
+# Suppress HuggingFace warnings
+os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
+import warnings
+warnings.filterwarnings("ignore", message=".*trust_remote_code.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
 # GoEmotions 28 emotion labels (from successful model)
 EMOTION_LABELS = [
     "admiration", "amusement", "anger", "annoyance", "approval", "caring", "confusion",
@@ -101,10 +108,20 @@ def load_semeval():
     """Load SemEval-2018 EI-reg dataset with enhanced fallbacks"""
     print("📥 Loading SemEval-2018 EI-reg dataset...")
 
-    # Check for local SemEval data first
-    semeval_zip = "data/semeval/SemEval2018-T1-all-data.zip"
+    # Check for local SemEval data first (try multiple possible locations)
+    possible_paths = [
+        "data/semeval/SemEval2018-T1-all-data.zip",
+        "data/semeval2018/SemEval2018-Task1-all-data.zip"
+    ]
 
-    if not os.path.exists(semeval_zip):
+    semeval_zip = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            semeval_zip = path
+            print(f"✅ Found SemEval zip at: {path}")
+            break
+
+    if semeval_zip is None:
         print("⚠️ Local SemEval zip not found, trying online download...")
 
         # Try to download SemEval data
@@ -267,10 +284,12 @@ def load_isear():
                 print(f"✅ Processed {len(isear_data)} ISEAR samples with proper emotion mapping")
                 return isear_data
 
-        except:
-            print("⚠️ Official ISEAR dataset not available, trying alternative...")
+        except Exception as e:
+            print(f"⚠️ ISEAR dataset failed: {e}")
+            # Fall through to alternative
 
         # Alternative: Use emotion-focused dataset
+        print("⚠️ Official ISEAR dataset not available, trying alternative...")
         dataset = load_dataset("emotion", trust_remote_code=True)
         print("✅ Using emotion dataset as ISEAR alternative")
 
@@ -285,16 +304,28 @@ def load_isear():
             5: 26    # surprise -> surprise
         }
 
-        for item in dataset['train'][:1500]:
-            text = item.get('text', '')
-            label = item.get('label', -1)
+        # Use the proper Hugging Face dataset iteration
+        dataset_length = len(dataset['train'])
 
-            if len(text) > 10 and label in emotion_to_goemotions:
-                isear_data.append({
-                    'text': text,
-                    'labels': [emotion_to_goemotions[label]],
-                    'source': 'isear_alt'
-                })
+        # Iterate through the dataset using the select method or direct iteration
+        for i in range(min(dataset_length, 1500)):
+            try:
+                # Get individual row
+                item = dataset['train'][i]
+
+                # Extract text and label
+                text = item['text']
+                label = item['label']
+
+                if len(text) > 10 and label in emotion_to_goemotions:
+                    isear_data.append({
+                        'text': text,
+                        'labels': [emotion_to_goemotions[label]],
+                        'source': 'isear_alt'
+                    })
+
+            except (IndexError, TypeError, ValueError, KeyError) as e:
+                continue
 
         print(f"✅ Processed {len(isear_data)} emotion samples as ISEAR alternative")
         return isear_data
@@ -459,13 +490,13 @@ def save_datasets(train_data, val_data):
     print(f"💾 Saving dataset: {train_path}")
     with open(train_path, 'w') as f:
         for item in train_data:
-            f.write(json.dumps(item) + '\\n')
+            f.write(json.dumps(item) + '\n')
     print(f"✅ Saved {len(train_data)} samples")
 
     print(f"💾 Saving dataset: {val_path}")
     with open(val_path, 'w') as f:
         for item in val_data:
-            f.write(json.dumps(item) + '\\n')
+            f.write(json.dumps(item) + '\n')
     print(f"✅ Saved {len(val_data)} samples")
 
 def main():
