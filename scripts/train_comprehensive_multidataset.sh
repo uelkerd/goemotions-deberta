@@ -74,8 +74,8 @@ log_with_timestamp() {
     log_with_timestamp "   Learning rate: $LR"
     log_with_timestamp "   Output: $OUTPUT_DIR"
 
-    # Start training (using BCE - the proven winner)
-    log_with_timestamp "🚀 Starting training with BCE (proven configuration)..."
+    # Start training with Combined Loss (better for multi-dataset)
+    log_with_timestamp "🚀 Starting training with Combined Loss (optimized for multi-dataset)..."
 
     python3 notebooks/scripts/train_deberta_local.py \\
         --output_dir "$OUTPUT_DIR" \\
@@ -90,9 +90,14 @@ log_with_timestamp() {
         --weight_decay 0.01 \\
         --fp16 \\
         --max_length 256 \\
+        --use_combined_loss \\
+        --loss_combination_ratio 0.7 \\
+        --gamma 2.0 \\
+        --label_smoothing 0.1 \\
+        --use_class_weights \\
+        --oversample_rare_classes \\
         --augment_prob 0.0 \\
         --freeze_layers 0 \\
-        --label_smoothing 0.0 \\
         --early_stopping_patience 3 \\
         2>&1 | tee -a "$LOGFILE"
 

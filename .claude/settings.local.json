@@ -9,7 +9,10 @@
       "Bash(~/miniconda3/bin/conda run -n samo-dl-stable python notebooks/scripts/test_environment.py)",
       "Bash(git fetch:*)",
       "Bash(git pull:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(git push:*)",
+      "Bash(python test:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

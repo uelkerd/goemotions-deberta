@@ -108,11 +108,16 @@ class ProgressMonitorCallback(TrainerCallback):
         self.last_backup_time = time.time()
         self.backup_interval = 900  # Backup every 15 minutes
         self.enable_gdrive_backup = enable_gdrive_backup
-        # Use the exact path format as confirmed by rclone ls command
-        # Create timestamped backup directory
+        # Create configurable backup directory (no emojis, flexible path)
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.gdrive_backup_path = f"'drive:00_Projects/🎯 TechLabs-2025/Final_Project/TRAINING/GoEmotions-DeBERTa-Backup/MultiDataset_BCE_{timestamp}/'"
+
+        # Make Google Drive path configurable via environment variable
+        base_backup_path = os.environ.get(
+            'GDRIVE_BACKUP_PATH',
+            'drive:backup/goemotions-training'
+        )
+        self.gdrive_backup_path = f"{base_backup_path}/multidataset_{timestamp}"
 
     def on_step_end(self, args, state, control, **kwargs):
         current_time = time.time()
