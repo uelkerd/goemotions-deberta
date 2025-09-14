@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(~/miniconda3/bin/conda list -n samo-dl-stable)",
+      "Bash(~/miniconda3/bin/conda run -n samo-dl-stable pip install --upgrade datasets transformers sentencepiece tiktoken)",
+      "Bash(~/miniconda3/bin/conda run -n samo-dl-stable python --version)",
+      "Bash(~/miniconda3/bin/conda run -n samo-dl-stable pip list)",
+      "Bash(~/miniconda3/bin/conda run -n samo-dl-stable python notebooks/scripts/test_environment.py)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(chmod:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
