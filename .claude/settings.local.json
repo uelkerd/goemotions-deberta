@@ -12,7 +12,8 @@
       "Bash(chmod:*)",
       "Bash(git push:*)",
       "Bash(python test:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
