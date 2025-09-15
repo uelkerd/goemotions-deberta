@@ -54,15 +54,26 @@ log_with_timestamp() {
     VAL_COUNT=$(wc -l < data/combined_all_datasets/val.jsonl)
     log_with_timestamp "✅ Dataset ready: $TRAIN_COUNT train, $VAL_COUNT val samples"
 
-    # Set GPU
-    export CUDA_VISIBLE_DEVICES=0
-    log_with_timestamp "🎮 Using GPU: $CUDA_VISIBLE_DEVICES"
+    # Auto-detect GPUs and enable dual GPU training if available
+    GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null || echo "1")
+
+    if [ "$GPU_COUNT" -gt 1 ]; then
+        export CUDA_VISIBLE_DEVICES=0,1
+        log_with_timestamp "🚀 DUAL GPU TRAINING: Using GPUs 0,1"
+        log_with_timestamp "⚡ DataParallel will be enabled automatically"
+        # Reduce batch size per GPU for dual GPU training
+        BATCH_SIZE=2  # 2 per GPU = effective batch size 4
+        EVAL_BATCH_SIZE=4  # 4 per GPU = effective batch size 8
+    else
+        export CUDA_VISIBLE_DEVICES=0
+        log_with_timestamp "📱 Single GPU training: Using GPU 0"
+        BATCH_SIZE=4
+        EVAL_BATCH_SIZE=8
+    fi
 
     # Training parameters (using proven BCE configuration)
     OUTPUT_DIR="checkpoints_comprehensive_multidataset"
     MODEL_TYPE="deberta-v3-large"
-    BATCH_SIZE=4
-    EVAL_BATCH_SIZE=8
     GRAD_ACCUM=4
     EPOCHS=3  # Extended training for better convergence
     LR="3e-5"  # Proven optimal learning rate
