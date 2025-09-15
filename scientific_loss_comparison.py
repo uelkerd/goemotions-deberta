@@ -73,9 +73,9 @@ class LossFunctionTester:
             'python3', 'notebooks/scripts/train_deberta_local.py',
             '--output_dir', str(output_dir),
             '--model_type', 'deberta-v3-large',
-            '--per_device_train_batch_size', '4',
-            '--per_device_eval_batch_size', '8',
-            '--gradient_accumulation_steps', '2',  # Reduced for faster testing
+            '--per_device_train_batch_size', '2',  # Reduced per GPU for dual GPU setup
+            '--per_device_eval_batch_size', '4',   # Reduced per GPU for dual GPU setup
+            '--gradient_accumulation_steps', '4',  # Increased to maintain effective batch size
             '--num_train_epochs', '2',  # Quick test first
             '--learning_rate', '3e-5',
             '--lr_scheduler_type', 'cosine',
@@ -94,9 +94,9 @@ class LossFunctionTester:
         # Add loss-specific arguments
         cmd = base_cmd + config['args']
 
-        # Set environment for single GPU
+        # Set environment for dual GPU parallel training
         env = os.environ.copy()
-        env['CUDA_VISIBLE_DEVICES'] = '0'  # Use single GPU for stability
+        env['CUDA_VISIBLE_DEVICES'] = '0,1'  # Use both GPUs for maximum speed
 
         logger.info(f"Command: {' '.join(cmd)}")
 
