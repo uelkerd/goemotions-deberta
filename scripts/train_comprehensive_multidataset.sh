@@ -102,10 +102,7 @@ log_with_timestamp() {
         --weight_decay 0.01 \
         --fp16 \
         --max_length 256 \
-        --use_combined_loss \
-        --loss_combination_ratio 0.7 \
-        --gamma 2.0 \
-        --label_smoothing 0.1 \
+        --threshold 0.2 \
         --augment_prob 0.0 \
         --freeze_layers 0 \
         --early_stopping_patience 3"
