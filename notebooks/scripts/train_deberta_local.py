@@ -1117,6 +1117,29 @@ def main():
     if hasattr(model.classifier, 'dropout') and model.classifier.dropout.p != 0.3:
         model.classifier.dropout.p = 0.3
         print("✅ Set classifier dropout to 0.3")
+
+    # GPU Detection and Multi-GPU Setup
+    device_count = torch.cuda.device_count()
+    print(f"🎮 GPU Detection: {device_count} GPU(s) available")
+
+    if device_count > 1:
+        print(f"🚀 DUAL GPU TRAINING ENABLED: Using {device_count} GPUs")
+        for i in range(device_count):
+            gpu_name = torch.cuda.get_device_name(i)
+            print(f"   GPU {i}: {gpu_name}")
+
+        # Use DataParallel for multi-GPU training
+        print("⚡ Wrapping model with DataParallel for multi-GPU training...")
+        model = torch.nn.DataParallel(model)
+
+        # Adjust batch size for multiple GPUs
+        effective_batch_size = args.per_device_train_batch_size * device_count
+        print(f"📊 Effective batch size with {device_count} GPUs: {effective_batch_size}")
+
+    elif device_count == 1:
+        print(f"📱 Single GPU training: {torch.cuda.get_device_name(0)}")
+    else:
+        print("⚠️ No GPU detected, using CPU (will be very slow!)")
     
     # Load datasets from local cache
     train_path, val_path = load_dataset_local()
