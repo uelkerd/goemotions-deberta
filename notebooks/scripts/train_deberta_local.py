@@ -1236,6 +1236,11 @@ def main():
     if args.early_stopping_patience > 0:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience))
 
+    # DEBUG: Explicitly log loss function configuration
+    print(f"🔍 Loss Configuration Debug:")
+    print(f"   use_combined_loss: {args.use_combined_loss}")
+    print(f"   use_asymmetric_loss: {args.use_asymmetric_loss}")
+
     if args.use_combined_loss:
         print("🚀 Using Combined Loss (ASL + Class Weighting + Focal Loss) for maximum performance")
         print(f"📊 Loss combination ratio: {args.loss_combination_ratio} ASL + {1-args.loss_combination_ratio} Focal")

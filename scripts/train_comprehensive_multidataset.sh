@@ -55,8 +55,31 @@ log_with_timestamp() {
     log_with_timestamp "✅ Dataset ready: $TRAIN_COUNT train, $VAL_COUNT val samples"
 
     # Auto-detect GPUs and enable dual GPU training if available
-    GPU_COUNT=$(nvidia-smi --list-gpus | wc -l 2>/dev/null || echo "1")
-    GPU_COUNT=$(echo "$GPU_COUNT" | tr -d '[:space:]')  # Remove any whitespace
+    # More robust GPU detection with multiple fallback methods
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        # Method 1: Count GPU lines, ensure clean integer
+        GPU_COUNT=$(nvidia-smi --list-gpus 2>/dev/null | wc -l | tr -d '[:space:]' || echo "1")
+
+        # Method 2: Fallback with nvidia-ml-py style query
+        if [ -z "$GPU_COUNT" ] || [ "$GPU_COUNT" = "0" ]; then
+            GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader,nounits 2>/dev/null | wc -l | tr -d '[:space:]' || echo "1")
+        fi
+
+        # Method 3: Final fallback - check for device files
+        if [ -z "$GPU_COUNT" ] || [ "$GPU_COUNT" = "0" ]; then
+            GPU_COUNT=$(ls /dev/nvidia[0-9]* 2>/dev/null | wc -l | tr -d '[:space:]' || echo "1")
+        fi
+    else
+        GPU_COUNT="1"
+    fi
+
+    # Ensure GPU_COUNT is a valid integer
+    if ! [[ "$GPU_COUNT" =~ ^[0-9]+$ ]] || [ "$GPU_COUNT" -eq 0 ]; then
+        log_with_timestamp "⚠️ GPU detection failed, defaulting to single GPU"
+        GPU_COUNT="1"
+    fi
+
+    log_with_timestamp "🎮 Detected $GPU_COUNT GPU(s)"
 
     if [ "$GPU_COUNT" -gt 1 ]; then
         export CUDA_VISIBLE_DEVICES=0,1
@@ -72,12 +95,12 @@ log_with_timestamp() {
         EVAL_BATCH_SIZE=8
     fi
 
-    # Training parameters (using proven BCE configuration)
+    # Training parameters (using proven BCE configuration + optimizations)
     OUTPUT_DIR="checkpoints_comprehensive_multidataset"
     MODEL_TYPE="deberta-v3-large"
     GRAD_ACCUM=4
     EPOCHS=3  # Extended training for better convergence
-    LR="3e-5"  # Proven optimal learning rate
+    LR="2e-5"  # Optimized learning rate (slightly lower than 3e-5 for stability)
 
     log_with_timestamp "⚙️ Training parameters:"
     log_with_timestamp "   Model: $MODEL_TYPE"
@@ -98,9 +121,9 @@ log_with_timestamp() {
         --gradient_accumulation_steps $GRAD_ACCUM \
         --num_train_epochs $EPOCHS \
         --learning_rate $LR \
-        --lr_scheduler_type \"cosine\" \
-        --warmup_ratio 0.1 \
-        --weight_decay 0.01 \
+        --lr_scheduler_type \"polynomial\" \
+        --warmup_ratio 0.2 \
+        --weight_decay 0.005 \
         --fp16 \
         --max_length 256 \
         --threshold 0.2 \
