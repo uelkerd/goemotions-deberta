@@ -14,7 +14,8 @@
       "Bash(python test:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(nvidia-smi:*)"
     ],
     "deny": [],
     "ask": []

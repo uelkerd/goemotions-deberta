@@ -55,7 +55,8 @@ log_with_timestamp() {
     log_with_timestamp "✅ Dataset ready: $TRAIN_COUNT train, $VAL_COUNT val samples"
 
     # Auto-detect GPUs and enable dual GPU training if available
-    GPU_COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null || echo "1")
+    GPU_COUNT=$(nvidia-smi --list-gpus | wc -l 2>/dev/null || echo "1")
+    GPU_COUNT=$(echo "$GPU_COUNT" | tr -d '[:space:]')  # Remove any whitespace
 
     if [ "$GPU_COUNT" -gt 1 ]; then
         export CUDA_VISIBLE_DEVICES=0,1
@@ -85,8 +86,8 @@ log_with_timestamp() {
     log_with_timestamp "   Learning rate: $LR"
     log_with_timestamp "   Output: $OUTPUT_DIR"
 
-    # Start training with Combined Loss (better for multi-dataset)
-    log_with_timestamp "🚀 Starting training with Combined Loss (optimized for multi-dataset)..."
+    # Start training with pure BCE Loss (proven configuration)
+    log_with_timestamp "🚀 Starting training with pure BCE Loss (proven 51.79% configuration)..."
 
     # Build the command as a single line to avoid bash line continuation issues
     CMD="python3 notebooks/scripts/train_deberta_local.py \

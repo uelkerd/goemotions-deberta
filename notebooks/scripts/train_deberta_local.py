@@ -1056,7 +1056,8 @@ def main():
     parser.add_argument("--label_smoothing", type=float, default=0.1, help="Label smoothing factor")
     parser.add_argument("--early_stopping_patience", type=int, default=3, help="Patience for early stopping")
     parser.add_argument("--deepspeed", type=str, default=None, help="Path to DeepSpeed config file")
-    
+    parser.add_argument("--threshold", type=float, default=0.2, help="Classification threshold for F1 evaluation (default: 0.2)")
+
     args = parser.parse_args()
     
     # Set random seeds for reproducibility
