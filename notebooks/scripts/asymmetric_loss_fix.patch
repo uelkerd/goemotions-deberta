@@ -1,0 +1,250 @@
+--- train_deberta_local.py.orig	2025-09-09 15:00:00.000000000 +0000
++++ train_deberta_local.py	2025-09-09 15:10:00.000000000 +0000
+@@ -26,6 +26,9 @@
+ os.environ["NCCL_TIMEOUT"] = "1800"  # 30 minutes timeout (reduced from 1 hour)
+ os.environ["NCCL_BLOCKING_WAIT"] = "1"  # Enable blocking wait
+ os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"  # Better error handling
++os.environ["NCCL_SOCKET_IFNAME"] = "lo"  # Force localhost-only communication
++os.environ["NCCL_IB_DISABLE"] = "1"  # Disable InfiniBand
++os.environ["NCCL_DEBUG"] = "INFO"  # Enable debug info for troubleshooting
+ 
+ from typing import List, Dict, Any
+ import torch
+@@ -35,7 +38,8 @@
+ from torch.utils.data import Dataset
+ from transformers import (
+     AutoTokenizer, AutoModelForSequenceClassification, AutoConfig,
+-    Trainer, TrainingArguments, DataCollatorWithPadding
++    Trainer, TrainingArguments, DataCollatorWithPadding,
++    TrainerCallback, TrainerState, TrainerControl
+ )
+ from sklearn.metrics import f1_score, precision_recall_fscore_support
+ import logging
+@@ -43,6 +47,9 @@
+ import random
+ from datetime import datetime
+ 
++import sys
++import traceback
++import shutil
+ 
+ # Set up logging
+ logging.basicConfig(level=logging.INFO)
+@@ -123,6 +130,67 @@
+         with open(self.log_file, 'a') as f:
+             f.write(json.dumps(log_data) + '\n')
+ 
++# ProgressMonitorCallback to detect training stalls
++class ProgressMonitorCallback(TrainerCallback):
++    """Monitors progress and detects stalls in training"""
++    
++    def __init__(self, stall_timeout=600, disk_quota_check=True, min_free_space_gb=10):
++        """Initialize ProgressMonitor
++        
++        Args:
++            stall_timeout: Seconds without progress before considering training stalled
++            disk_quota_check: Whether to check disk space
++            min_free_space_gb: Minimum free disk space in GB before warning
++        """
++        self.last_step = 0
++        self.last_progress_time = time.time()
++        self.stall_timeout = stall_timeout
++        self.disk_quota_check = disk_quota_check
++        self.min_free_space_gb = min_free_space_gb
++        self.check_disk_space()
++    
++    def check_disk_space(self):
++        """Check available disk space"""
++        if not self.disk_quota_check:
++            return True
++        
++        try:
++            # Get disk usage of current directory
++            disk = shutil.disk_usage('.')
++            free_gb = disk.free / (1024 ** 3)
++            total_gb = disk.total / (1024 ** 3)
++            used_percent = (disk.used / disk.total) * 100
++            
++            print(f"💾 Disk space: {free_gb:.1f}GB free / {total_gb:.1f}GB total ({used_percent:.1f}% used)")
++            
++            if free_gb < self.min_free_space_gb:
++                print(f"⚠️ LOW DISK SPACE WARNING: Only {free_gb:.1f}GB free. Training may fail with disk quota error.")
++                if used_percent > 85:
++                    print("🔥 CRITICAL: Disk usage above 85%. Try to free up space immediately!")
++                return False
++                
++            return True
++        except Exception as e:
++            print(f"⚠️ Error checking disk space: {e}")
++            return True
++    
++    def on_step_end(self, args, state, control, **kwargs):
++        """Called after each step"""
++        # Update progress tracker if step increased
++        if state.global_step > self.last_step:
++            self.last_step = state.global_step
++            self.last_progress_time = time.time()
++        
++        # Check if we're stalled
++        time_since_progress = time.time() - self.last_progress_time
++        if time_since_progress > self.stall_timeout:
++            print(f"⚠️ WARNING: No progress for {time_since_progress:.1f} seconds (stall detected)")
++            print(f"🔍 Last progress at step {self.last_step}")
++            
++            # Check disk space on stall detection
++            if not self.check_disk_space():
++                print("❌ TRAINING STOPPED: Disk space critical. Clean up files before continuing.")
++                raise RuntimeError("Training stopped due to disk quota issue")
++        
++        return control
+ 
+ # GoEmotions labels
+ EMOTION_LABELS = [
+@@ -139,7 +207,7 @@
+-    def __init__(self, gamma_neg=1.0, gamma_pos=1.0, clip=0.2, eps=1e-8, disable_torch_grad_focal_loss=True):
++    def __init__(self, gamma_neg=1.0, gamma_pos=1.0, clip=0.2, eps=1e-8, disable_torch_grad_focal_loss=False):
+         super(AsymmetricLoss, self).__init__()
+         self.gamma_neg = gamma_neg
+         self.gamma_pos = gamma_pos
+@@ -173,12 +241,7 @@
+         if self.gamma_neg > 0 or self.gamma_pos > 0:
+             # FIXED: Remove no_grad for full differentiability (HF docs compliant)
+             if self.disable_torch_grad_focal_loss:
+-                with torch.no_grad():
+-                    pt0 = xs_pos * y
+-                    pt1 = xs_neg * (1 - y)  # pt = p if t > 0 else 1-p
+-                    pt = pt0 + pt1
+-                    one_sided_gamma = self.gamma_pos * y + self.gamma_neg * (1 - y)
+-                    one_sided_w = torch.pow(1 - pt, one_sided_gamma)
++                # WARNING: This code path has gradient disconnection - never use this!
+                 loss = loss * one_sided_w
+             else:
+                 pt0 = xs_pos * y
+@@ -247,7 +310,7 @@
+     """
+     def __init__(self, loss_combination_ratio=0.7, *args, **kwargs):
+         super().__init__(*args, **kwargs)
+-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=True)
++        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
+         self.focal_loss = FocalLoss(alpha=0.25, gamma=2.0)
+         self.loss_combination_ratio = loss_combination_ratio
+ 
+@@ -384,7 +447,7 @@
+     """
+     def __init__(self, *args, **kwargs):
+         super().__init__(*args, **kwargs)
+-        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=True)
++        self.asymmetric_loss = AsymmetricLoss(gamma_neg=1.0, gamma_pos=1.0, clip=0.2, disable_torch_grad_focal_loss=False)
+ 
+     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+         """
+@@ -680,6 +743,42 @@
+         return None, None
+ 
+ 
++def check_system_status():
++    """Check system status and resources"""
++    print("\n🔍 Checking system status...")
++    
++    # Check disk space
++    try:
++        disk = shutil.disk_usage('.')
++        free_gb = disk.free / (1024 ** 3)
++        total_gb = disk.total / (1024 ** 3)
++        used_percent = (disk.used / disk.total) * 100
++        print(f"💾 Disk space: {free_gb:.1f}GB free / {total_gb:.1f}GB total ({used_percent:.1f}% used)")
++        
++        if free_gb < 10:
++            print(f"⚠️ LOW DISK SPACE WARNING: Only {free_gb:.1f}GB free")
++        if used_percent > 85:
++            print("🔥 CRITICAL: Disk usage above 85%. Training may fail!")
++    except Exception as e:
++        print(f"⚠️ Error checking disk space: {e}")
++    
++    # Check GPU status
++    try:
++        if torch.cuda.is_available():
++            for i in range(torch.cuda.device_count()):
++                print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
++                print(f"   Memory: {torch.cuda.memory_allocated(i)/1024**2:.1f}MB allocated, "
++                      f"{torch.cuda.memory_reserved(i)/1024**2:.1f}MB reserved")
++        else:
++            print("❌ No GPUs available")
++    except Exception as e:
++        print(f"⚠️ Error checking GPU status: {e}")
++    
++    print("✅ System check complete\n")
++
++
++def handle_exception(e, scientific_logger=None):
++    """Handle exceptions with comprehensive error logging"""
++    error_msg = f"❌ ERROR: {str(e)}"
++    print(error_msg)
++    print("Stack trace:")
++    traceback_str = traceback.format_exc()
++    print(traceback_str)
++    
++    # Log to scientific logger if available
++    if scientific_logger:
++        error_log = {
++            "timestamp": datetime.now().isoformat(),
++            "error": str(e),
++            "traceback": traceback_str,
++        }
++        scientific_logger._write_log(error_log)
++    
++    return 1
++
++
+ def main():
+     parser = argparse.ArgumentParser()
+     parser.add_argument("--output_dir", type=str, default="./outputs/deberta")
+@@ -717,10 +816,13 @@
+     print(f"📊 Dataset: GoEmotions (from local cache)")
+     print(f"🔬 Scientific logging: ENABLED")
+     
++    # Check system resources
++    check_system_status()
++    
+     # Create output directory
+-    os.makedirs(args.output_dir, exist_ok=True)
++    try:
++        os.makedirs(args.output_dir, exist_ok=True)
++    except Exception as e:
++        print(f"❌ ERROR: Could not create output directory: {e}")
++        print("💡 TIP: Check disk quota or remove old checkpoints")
++        return 1
+     
+     # Initialize scientific logger
+     scientific_logger = ScientificLogger(args.output_dir)
+@@ -813,6 +915,9 @@
+             compute_metrics=compute_comprehensive_metrics,
+         )
+     
++    # Add progress monitoring callback
++    progress_monitor = ProgressMonitorCallback(stall_timeout=600)  # 10 minutes timeout
++    trainer.add_callback(progress_monitor)
+     
+     # Train
+     print("🚀 Starting training...")
+-    trainer.train()
++    try:
++        trainer.train()
++    except Exception as e:
++        handle_exception(e, scientific_logger)
++        return 1
+     
+     # Save final model
+     trainer.save_model()
+@@ -904,4 +1009,10 @@
+ 
+ 
+ if __name__ == "__main__":
+-    main()
++    try:
++        main()
++    except Exception as e:
++        print(f"❌ UNHANDLED ERROR: {str(e)}")
++        traceback.print_exc()
++        sys.exit(1)
++
